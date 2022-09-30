@@ -1,0 +1,85 @@
+---
+title: "Draft_Mid_Term"
+author: "Yiping Ying"
+date: "2022-09-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+# Set Up:
+```{r load_packages, include=FALSE}
+
+# You can set some global options for knitting chunks
+
+knitr::opts_chunk$set(echo = TRUE)
+
+# Load some libraries
+
+library(tidyverse)
+library(sf)
+library(spdep)
+library(caret)
+library(ckanr)
+library(FNN)
+library(grid)
+library(gridExtra)
+library(ggcorrplot) # plot correlation plot
+library(corrr)      # another way to plot correlation plot
+library(kableExtra)
+library(jtools)     # for regression model plots
+library(ggstance) # to support jtools plots
+library(ggpubr)    # plotting R^2 value on ggplot point scatter
+library(broom.mixed) # needed for effects plots
+
+# functions and data directory
+
+source("https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/functions.r")
+
+palette5 <- c("#25CB10", "#5AB60C", "#8FA108",   "#C48C04", "#FA7800")
+```
+
+```{r set_directory,include=FALSE}
+setwd("C:/Users/yyp/Desktop/Upenn/MUSA/courses/MUSA5080/Midterm")
+```
+
+```{r raw_data}
+#原始数据
+data<-st_read("./data/studentData.geojson")
+```
+
+```{r challenge_set}
+#challenge_set:用于最后预测的组，crs=4326
+challenge_set<-data %>% filter(price==0)
+```
+
+```{r model_set}
+#model_set:建模组,crs=4326
+model_set<-data %>% filter(price!=0)
+```
+
+```{r nhoods}
+#读取该地区的地图,crs=4326(?ESRI:103500)
+nhoods<-st_read('./data/neighborhood/npa.shp')
+
+nhoods<-nhoods %>% st_transform(crs=4326)
+```
+
+```{r nhoods_plot}
+#作图,坐标4326
+ggplot()+
+  geom_sf(data=nhoods)
+```
+
+```{r crime_data}
+crime<-st_read("./data/Crime - Violent.geojson")
+```
+
+```{r crime_data_plot}
+ggplot()+
+  geom_sf(data=crime,aes(fill=X2011),color="transparent")
+```
