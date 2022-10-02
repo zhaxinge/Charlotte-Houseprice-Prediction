@@ -9,9 +9,9 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+# II.Data Manipulation and Visualization
 
-
-# Set Up:
+## 2.0 Set Up
 ```{r load_packages, include=FALSE}
 
 # You can set some global options for knitting chunks
@@ -35,23 +35,161 @@ library(jtools)     # for regression model plots
 library(ggstance) # to support jtools plots
 library(ggpubr)    # plotting R^2 value on ggplot point scatter
 library(broom.mixed) # needed for effects plots
+library(stargazer)
+library(tidycensus)
+
+options(scipen = 999)
+options(tigris_class = "sf")
 
 # functions and data directory
 
 source("https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/functions.r")
 
-palette5 <- c("#25CB10", "#5AB60C", "#8FA108",   "#C48C04", "#FA7800")
+palette5 <- c("#0571b0","#92c5de","#ffffbf","#f4a582","#ca0020")
 ```
 
 ```{r set_directory,include=FALSE}
 setwd("C:/Users/yyp/Desktop/Upenn/MUSA/courses/MUSA5080/Midterm")
 ```
 
+```{r load_key, warning = FALSE,message=FALSE}
+census_api_key("c1c749a5ad57fa58fe19e1403d894e9acef41a97", install=TRUE,overwrite = TRUE)
+```
+## 2.1 Data Wrangling
+
+### 2.1.1 Data loading
 ```{r raw_data}
-#原始数据
+#Raw Data:
 data<-st_read("./data/studentData.geojson")
+
+#Add age,pricepersq,bathrooms
+data<-data %>% mutate(AGE = 2022-yearbuilt,
+                                pricepersq = price/shape_Area,
+                                bathrooms = fullbaths+halfbaths)
 ```
 
+```{r download_data,warning=FALSE,message=FALSE}
+#download open data,crs=4326(?ESRI:103500)
+
+#Census Tract:
+tract<-st_read('./data/CensusTract/Census_Tracts_2020.shp')
+tract<-tract %>% st_transform(crs=4326)
+
+#Zipcode:
+zipcode<-st_read('./data/zipcode/Zipcode.shp')
+zipcode<-zipcode %>% st_transform(crs=4326) %>% rename(shapeLeng = shape_Leng,shapeArea = shape_Area) %>% dplyr::select(zip,po_name,shapeLeng,shapeArea)
+
+#Capital Improvement Projects:
+investment<-st_read('./data/Capital_Improvement_Projects/Capital_Improvement_Projects.shp')
+investment<-investment %>% st_transform(crs=4326)
+
+#Business Investment Opportunity Zones:
+business_invest<-st_read('./data/Business/Business_Investment_Opportunity_Zones.shp')
+business_invest<-business_invest %>% st_transform(crs=4326)
+
+#Park Locations:
+park<-st_read('./data/Park_Locations/Park_Locations.shp')
+park<-park %>% st_transform(crs=4326)
+```
+
+```{r neighborhood_effects_factor_and_clean}
+#spatial features collection
+
+#Crime:
+crime<-st_read('./data/Crime - Violent.geojson')
+crime<-crime %>% st_transform(crs=4326)
+crime1<-crime %>% mutate(crime_sum = X2019.raw+X2020.raw+X2021.raw) %>%  dplyr::select(crime_sum) 
+
+#Long Commute:
+long_commute<-st_read('./data/LongCommute.geojson')
+long_commute<-long_commute %>% st_transform(crs=4326) %>% mutate(PctLongCommute = X2020) %>%  dplyr::select(PctLongCommute)
+
+#Percent of Grocery:
+grocery<-st_read('./data/Proximity to a Grocery Store.geojson')
+Pctgrocery<-grocery %>% st_transform(crs=4326) %>% mutate(Pctgrocery = X2021) %>%  dplyr::select(Pctgrocery)
+
+#Percent of canopy in residential area:
+canopy<-st_read('./data/Tree Canopy - Residential.geojson')
+Pctcanopy<-canopy %>% st_transform(crs=4326) %>% mutate(Pctcanopy = X2012) %>% dplyr::select(Pctcanopy)
+
+#Percent of Test Proficiency in Elementary Schools:
+test_elementary<-st_read('./data/Test Proficiency - Elementary School.geojson')
+Pcttest1<-test_elementary%>% st_transform(crs=4326) %>%mutate( test.elementary = X2019) %>% dplyr::select(test.elementary)
+
+#Percent of Test Proficiency in Middle Schools:
+test_middle<-st_read('./data/Test Proficiency - Middle School.geojson')
+Pcttest2<-test_middle%>% st_transform(crs=4326) %>%mutate( test.middle = X2019) %>% dplyr::select(test.middle)
+
+#Percent of Test Proficiency in High Schools:
+test_high<-st_read('./data/Test Proficiency - High School.geojson')
+Pcttest3<-test_high%>% st_transform(crs=4326) %>% mutate(test.high = X2019) %>% dplyr::select(test.high)
+
+#Percent of Bachelor's Degree:
+bachelor<-st_read('./data/Education Level - Bachelor Degree.geojson')
+PctBachelor<-bachelor %>% st_transform(crs=4326) %>% mutate(PctBachelor = X2020) %>% dplyr::select(PctBachelor)
+
+#Median Age of Residents:
+age<-st_read('./data/Age of Residents.geojson')
+MedAge<-age %>% st_transform(crs=4326) %>% mutate(MedAge = X2020) %>% dplyr::select(MedAge)
+```
+
+Census Data:
+```{r census_data,include=FALSE}
+options(tigris_use_cache = TRUE)
+
+acs_variable_list.2020 <- load_variables(2020, 
+                                         "acs5", 
+                                         cache = TRUE)
+
+tracts20 <- 
+  get_acs(geography = "tract", variables = c("B25026_001E","B02001_002E", "B19013_001E","B25058_001E","B06012_002E",                            
+"B25002_003E","B25004_002E","B25004_003E","B25004_004E","B25004_005E",
+"B25001_001E","B08137_003E"), 
+          year=2020, state= 37, county= 119, geometry=T, output="wide")%>% st_transform(crs=4326) %>%
+  rename(TotalPop = B25026_001E, 
+         Whites = B02001_002E,
+         MedHHInc = B19013_001E, 
+         MedRent = B25058_001E,
+         TotalPoverty = B06012_002E,
+         TotalVacant = B25002_003E,
+         ForRent = B25004_002E,
+         ForRentVac = B25004_003E,
+         ForSale = B25004_004E,
+         ForSaleVac = B25004_005E,
+         TotalUnit = B25001_001E,
+         RenterOccupied = B08137_003E
+         ) %>%
+  dplyr::select(-NAME, -starts_with("B")) %>% #-starts_with("B") awesome!
+  mutate(pctWhite = ifelse(TotalPop > 0, Whites / TotalPop,0),
+         pctPoverty = ifelse(TotalPop > 0, TotalPoverty / TotalPop, 0),
+         pctTotalVacant = ifelse(TotalUnit > 0, TotalVacant / TotalUnit * 100, 0),
+         TotalOccupied = TotalUnit - TotalVacant,
+         pctRenterOccupied = ifelse(TotalOccupied >0, RenterOccupied/TotalOccupied, 0)) %>%
+  dplyr::select(-Whites, -TotalPoverty) 
+```
+
+### 2.1.2 Feature Engineering
+
+```{r}
+ggplot()+
+  geom_sf(data=zipcode)
+```
+
+```{r data_left_join}
+data<-st_join(data,crime1)
+data<-st_join(data,long_commute)
+data<-st_join(data,Pctgrocery)
+data<-st_join(data,Pctcanopy)
+data<-st_join(data,Pcttest1)
+data<-st_join(data,Pcttest2)
+data<-st_join(data,Pcttest3)
+data<-st_join(data,PctBachelor)
+data<-st_join(data,MedAge)
+data<-st_join(data,zipcode)
+data<-st_join(data,tracts20)
+```
+
+### 2.1.3 Split dataset
 ```{r challenge_set}
 #challenge_set:用于最后预测的组，crs=4326
 challenge_set<-data %>% filter(price==0)
@@ -62,24 +200,41 @@ challenge_set<-data %>% filter(price==0)
 model_set<-data %>% filter(price!=0)
 ```
 
-```{r nhoods}
-#读取该地区的地图,crs=4326(?ESRI:103500)
-nhoods<-st_read('./data/neighborhood/npa.shp')
+## 2.2 Summary Statistics of Features
 
-nhoods<-nhoods %>% st_transform(crs=4326)
+model_set internal features
+```{r summary_internal_features}
+#Summary and selection of internal features:
+internal.features<-model_set%>% dplyr::select(price,shape_Area,pricepersq,AGE,heatedarea,numfirepla,fullbaths,halfbaths,bedrooms,units) %>% st_drop_geometry()
+
+#stargazer:
+stargazer(internal.features, type = "html", 
+          title = "Table DATA 2.1 Summary Statistics of Internal Characteristics ",
+          header = FALSE,
+          single.row = TRUE)
 ```
 
-```{r nhoods_plot}
-#作图,坐标4326
+```{r internal_feature_correlation_matrix}
+#Correlation matrix of internal features:
+numericVars <- 
+  select_if(internal.features, is.numeric) %>% na.omit()
+
+ggcorrplot(
+  round(cor(numericVars), 1), 
+  p.mat = cor_pmat(numericVars),
+  colors = c("#0571b0", "#ffffff", "#ca0020"),
+  type="lower",
+  insig = "blank") +  
+    labs(title = "Correlation across numeric variables") 
+```
+
+## Map Home Price
+```{r plot_home_price}
+#Plot of home price per square feet:
 ggplot()+
-  geom_sf(data=nhoods)
-```
-
-```{r crime_data}
-crime<-st_read("./data/Crime - Violent.geojson")
-```
-
-```{r crime_data_plot}
-ggplot()+
-  geom_sf(data=crime,aes(fill=X2011),color="transparent")
+  geom_sf(data=zipcode,fill="grey40",color="white")+
+  geom_sf(data=model_set,aes(color=q5(pricepersq)),show.legend="point",size=.75)+
+  scale_color_manual(values = palette5,labels = qBr(model_set, "pricepersq"),name = "House Price\nPer Square Feet\n(Quintile Breaks)")+
+  labs(title="House Price",subtitle = "Mecklenberg County,NC",caption="Figure1.1")+
+  mapTheme()
 ```
