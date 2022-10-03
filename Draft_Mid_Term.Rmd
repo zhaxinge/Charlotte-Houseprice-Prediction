@@ -76,59 +76,111 @@ tract<-st_read('./data/CensusTract/Census_Tracts_2020.shp')
 tract<-tract %>% st_transform(crs=4326)
 
 #Zipcode:
+##用于neighborhood effects分析
 zipcode<-st_read('./data/zipcode/Zipcode.shp')
 zipcode<-zipcode %>% st_transform(crs=4326) %>% rename(shapeLeng = shape_Leng,shapeArea = shape_Area) %>% dplyr::select(zip,po_name,shapeLeng,shapeArea)
+```
 
-#Capital Improvement Projects:
-investment<-st_read('./data/Capital_Improvement_Projects/Capital_Improvement_Projects.shp')
-investment<-investment %>% st_transform(crs=4326)
+```{r}
+ggplot()+
+  geom_sf(data=st_union(zipcode))+
+  geom_sf(data=park_amenities.sf)
+```
 
-#Business Investment Opportunity Zones:
+```{r}
+ggplot()+
+  geom_sf(data=st_union(tract))+
+  geom_sf(data=park_easement.sf)
+```
+
+```{r amenity_facility_feature,warning=FALSE}
+#1.college:
+college<-st_read('./data/college/Colleges.shp')
+college.sf<-college %>% st_transform(crs = 4326) %>% dplyr::select(geometry) %>% na.omit() 
+#2.daycare:
+daycare<-st_read('./data/daycare/Daycare.shp')
+daycare.sf<-daycare %>% st_transform(crs=4326)%>% dplyr::select(geometry) %>% na.omit() 
+
+#3.Medical Facilities:
+MedicalFacilities<-st_read('./data/medical/MedicalFacilities.shp')
+MedicalFacilities.sf<-MedicalFacilities %>% st_transform(crs=4326)%>% dplyr::select(geometry) %>% na.omit()
+
+#4.library:
+## 数目不太多
+library<-st_read('./data/library/Library.shp')
+library.sf<-library %>% st_transform(crs=4326)%>% dplyr::select(geometry) %>% na.omit() 
+
+#5.Historical cemeteries:
+## 原始数据是polygon,为了方便计算，使用st_centroid取了每个polygon的质心
+hist_cemeteries<-st_read('./data/historic_cemeteries/Historic_Cemeteries.shp')
+hist_cemeteries.sf<-hist_cemeteries %>% st_transform(crs=4326)%>% st_centroid() %>% dplyr::select(geometry) %>% na.omit() 
+
+#6.Historical Properties:
+## 原始数据是polygon,为了方便计算，使用st_centroid取了每个polygon的质心
+hist_properties<-st_read('./data/historic_properties/HistoricProperty_National.shp')
+hist_properties.sf<-hist_properties%>% st_transform(crs=4326)%>%st_centroid() %>% dplyr::select(geometry) %>% na.omit() 
+
+#7.church
+## 数目非常多
+church<-st_read('./data/church/Churches.shp')
+church.sf<-church %>% st_transform(crs=4326)%>% dplyr::select(geometry) %>% na.omit() 
+
+#8.park_amenities:
+park_amenities<-st_read('./data/park_amenities/ParkAmenity.shp')
+park_amenities.sf<-park_amenities%>% st_transform(crs=4326)%>% dplyr::select(geometry) %>% na.omit() 
+
+#9.park easement:
+park_easement<-st_read('./data/park_easement/ParkEasements.shp')
+park_easement.sf<-park_easement%>% st_transform(crs=4326)%>%st_centroid() %>% dplyr::select(geometry) %>% na.omit()
+
+#10.Capital Improvement Projects:
+capital_improve<-st_read('./data/Capital_Improvement_Projects/Capital_Improvement_Projects.shp')
+capital_improve.sf<-capital_improve %>% st_transform(crs=4326)%>% dplyr::select(geometry) %>% na.omit() 
+
+#11.Business Investment Opportunity Zones:
+##这个=做binary指标。原始数据是polygon;考虑使用buffer?
 business_invest<-st_read('./data/Business/Business_Investment_Opportunity_Zones.shp')
 business_invest<-business_invest %>% st_transform(crs=4326)
-
-#Park Locations:
-park<-st_read('./data/Park_Locations/Park_Locations.shp')
-park<-park %>% st_transform(crs=4326)
 ```
 
 ```{r neighborhood_effects_factor_and_clean}
 #spatial features collection
+##这个chunk内的都是以census tract为单位的指标；将合并到data
 
-#Crime:
+#1.Crime:
 crime<-st_read('./data/Crime - Violent.geojson')
 crime<-crime %>% st_transform(crs=4326)
 crime1<-crime %>% mutate(crime_sum = X2019.raw+X2020.raw+X2021.raw) %>%  dplyr::select(crime_sum) 
 
-#Long Commute:
+#2.Long Commute:
 long_commute<-st_read('./data/LongCommute.geojson')
 long_commute<-long_commute %>% st_transform(crs=4326) %>% mutate(PctLongCommute = X2020) %>%  dplyr::select(PctLongCommute)
 
-#Percent of Grocery:
+#3.Percent of Grocery:
 grocery<-st_read('./data/Proximity to a Grocery Store.geojson')
 Pctgrocery<-grocery %>% st_transform(crs=4326) %>% mutate(Pctgrocery = X2021) %>%  dplyr::select(Pctgrocery)
 
-#Percent of canopy in residential area:
+#4.Percent of canopy in residential area:
 canopy<-st_read('./data/Tree Canopy - Residential.geojson')
 Pctcanopy<-canopy %>% st_transform(crs=4326) %>% mutate(Pctcanopy = X2012) %>% dplyr::select(Pctcanopy)
 
-#Percent of Test Proficiency in Elementary Schools:
+#5.Percent of Test Proficiency in Elementary Schools:
 test_elementary<-st_read('./data/Test Proficiency - Elementary School.geojson')
 Pcttest1<-test_elementary%>% st_transform(crs=4326) %>%mutate( test.elementary = X2019) %>% dplyr::select(test.elementary)
 
-#Percent of Test Proficiency in Middle Schools:
+#6.Percent of Test Proficiency in Middle Schools:
 test_middle<-st_read('./data/Test Proficiency - Middle School.geojson')
 Pcttest2<-test_middle%>% st_transform(crs=4326) %>%mutate( test.middle = X2019) %>% dplyr::select(test.middle)
 
-#Percent of Test Proficiency in High Schools:
+#7.Percent of Test Proficiency in High Schools:
 test_high<-st_read('./data/Test Proficiency - High School.geojson')
 Pcttest3<-test_high%>% st_transform(crs=4326) %>% mutate(test.high = X2019) %>% dplyr::select(test.high)
 
-#Percent of Bachelor's Degree:
+#8.Percent of Bachelor's Degree:
 bachelor<-st_read('./data/Education Level - Bachelor Degree.geojson')
 PctBachelor<-bachelor %>% st_transform(crs=4326) %>% mutate(PctBachelor = X2020) %>% dplyr::select(PctBachelor)
 
-#Median Age of Residents:
+#9.Median Age of Residents:
 age<-st_read('./data/Age of Residents.geojson')
 MedAge<-age %>% st_transform(crs=4326) %>% mutate(MedAge = X2020) %>% dplyr::select(MedAge)
 ```
@@ -189,6 +241,123 @@ data<-st_join(data,zipcode)
 data<-st_join(data,tracts20)
 ```
 
+```{r knn}
+st_c<-st_coordinates
+
+#1.college:
+data <-
+  data %>% 
+  mutate(
+    college_nn1 = nn_function(st_c(data),st_c(college.sf), 1),
+    college_nn2 = nn_function(st_c(data),st_c(college.sf), 2),
+    college_nn3 = nn_function(st_c(data),st_c(college.sf), 3),
+    college_nn4 = nn_function(st_c(data),st_c(college.sf), 4),
+    college_nn5 = nn_function(st_c(data),st_c(college.sf), 5),
+    ) 
+
+#2.daycare:
+data <-
+  data %>% 
+  mutate(
+    daycare_nn1 = nn_function(st_c(data),st_c(daycare.sf), 1),
+    daycare_nn2 = nn_function(st_c(data),st_c(daycare.sf), 2),
+    daycare_nn3 = nn_function(st_c(data),st_c(daycare.sf), 3),
+    daycare_nn4 = nn_function(st_c(data),st_c(daycare.sf), 4),
+    daycare_nn5 = nn_function(st_c(data),st_c(daycare.sf), 5),
+    )
+
+#3.Medical Facilities:
+data <-
+  data %>% 
+  mutate(
+    MedicalFacilities_nn1 = nn_function(st_c(data),st_c(MedicalFacilities.sf), 1),
+    MedicalFacilities_nn2 = nn_function(st_c(data),st_c(MedicalFacilities.sf), 2),
+    MedicalFacilities_nn3 = nn_function(st_c(data),st_c(MedicalFacilities.sf), 3),
+    MedicalFacilities_nn4 = nn_function(st_c(data),st_c(MedicalFacilities.sf), 4),
+    MedicalFacilities_nn5 = nn_function(st_c(data),st_c(MedicalFacilities.sf), 5),
+    )
+
+#4.library:
+data <-
+  data %>% 
+  mutate(
+    library_nn1 = nn_function(st_c(data),st_c(library.sf), 1),
+    library_nn2 = nn_function(st_c(data),st_c(library.sf), 2),
+    library_nn3 = nn_function(st_c(data),st_c(library.sf), 3),
+    library_nn4 = nn_function(st_c(data),st_c(library.sf), 4),
+    library_nn5 = nn_function(st_c(data),st_c(library.sf), 5),
+    )
+
+#5.Historical cemeteries:
+data <-
+  data %>% 
+  mutate(
+    hist_cemeteries_nn1 = nn_function(st_c(data),st_c(hist_cemeteries.sf), 1),
+    hist_cemeteries_nn2 = nn_function(st_c(data),st_c(hist_cemeteries.sf), 2),
+    hist_cemeteries_nn3 = nn_function(st_c(data),st_c(hist_cemeteries.sf), 3),
+    hist_cemeteries_nn4 = nn_function(st_c(data),st_c(hist_cemeteries.sf), 4),
+    hist_cemeteries_nn5 = nn_function(st_c(data),st_c(hist_cemeteries.sf), 5),
+    )
+
+#6.Historical Properties:
+data <-
+  data %>% 
+  mutate(
+    hist_properties_nn1 = nn_function(st_c(data),st_c(hist_properties.sf), 1),
+    hist_properties_nn2 = nn_function(st_c(data),st_c(hist_properties.sf), 2),
+    hist_properties_nn3 = nn_function(st_c(data),st_c(hist_properties.sf), 3),
+    hist_properties_nn4 = nn_function(st_c(data),st_c(hist_properties.sf), 4),
+    hist_properties_nn5 = nn_function(st_c(data),st_c(hist_properties.sf), 5),
+    )
+
+#7.church
+data <-
+  data %>% 
+  mutate(
+    church_nn1 = nn_function(st_c(data),st_c(church.sf), 1),
+    church_nn2 = nn_function(st_c(data),st_c(church.sf), 2),
+    church_nn3 = nn_function(st_c(data),st_c(church.sf), 3),
+    church_nn4 = nn_function(st_c(data),st_c(church.sf), 4),
+    church_nn5 = nn_function(st_c(data),st_c(church.sf), 5),
+    )
+
+#9.park easement:
+data <-
+  data %>% 
+  mutate(
+    park_easement_nn1 = nn_function(st_c(data),st_c(park_easement.sf), 1),
+    park_easement_nn2 = nn_function(st_c(data),st_c(park_easement.sf), 2),
+    park_easement_nn3 = nn_function(st_c(data),st_c(park_easement.sf), 3),
+    park_easement_nn4 = nn_function(st_c(data),st_c(park_easement.sf), 4),
+    park_easement_nn5 = nn_function(st_c(data),st_c(park_easement.sf), 5),
+    )
+
+#10.Capital Improvement Projects:
+data <-
+  data %>% 
+  mutate(
+    capital_improve_nn1 = nn_function(st_c(data),st_c(capital_improve.sf), 1),
+    capital_improve_nn2 = nn_function(st_c(data),st_c(capital_improve.sf), 2),
+    capital_improve_nn3 = nn_function(st_c(data),st_c(capital_improve.sf), 3),
+    capital_improve_nn4 = nn_function(st_c(data),st_c(capital_improve.sf), 4),
+    capital_improve_nn5 = nn_function(st_c(data),st_c(capital_improve.sf), 5),
+    )
+```
+
+```{r eval=FALSE}
+#8.park_amenities:
+###这个需要将三围点变成二维点
+data0 <-
+  data0 %>% 
+  mutate(
+    park_amenities_nn1 = nn_function(st_c(data0),st_c(park_amenities.sf), 1),
+    park_amenities_nn2 = nn_function(st_c(data0),st_c(park_amenities.sf), 2),
+    park_amenities_nn3 = nn_function(st_c(data0),st_c(park_amenities.sf), 3),
+    park_amenities_nn4 = nn_function(st_c(data0),st_c(park_amenities.sf), 4),
+    park_amenities_nn5 = nn_function(st_c(data0),st_c(park_amenities.sf), 5),
+    )
+```
+
 ### 2.1.3 Split dataset
 ```{r challenge_set}
 #challenge_set:用于最后预测的组，crs=4326
@@ -224,8 +393,30 @@ ggcorrplot(
   p.mat = cor_pmat(numericVars),
   colors = c("#0571b0", "#ffffff", "#ca0020"),
   type="lower",
-  insig = "blank") +  
-    labs(title = "Correlation across numeric variables") 
+  insig = "pch") +  
+    labs(title = "Correlation across numeric variables")+plotTheme()
+```
+```{r summary_amenities_feature}
+amenities_feature.list<-data %>% dplyr::select(starts_with('daycare_'),starts_with('MedicalFacilities_'),starts_with('hist_c'),starts_with('park_'),starts_with('capital_'),starts_with('Pct'),starts_with('test.e'),pctTotalVacant, pctRenterOccupied, pctWhite,pctPoverty,MedRent ,MedHHInc,MedAge) %>% st_drop_geometry()
+
+#stargazer:
+stargazer(amenities_feature.list, type = "html", 
+          title = "Table DATA 2.1 Summary Statistics of Internal Characteristics ",
+          header = FALSE,
+          single.row = TRUE)
+```
+
+```{r amenities_feature_matrix}
+numericVars2 <- 
+  select_if(amenities_feature.list, is.numeric) %>% na.omit()
+
+ggcorrplot(
+  round(cor(numericVars2), 1), 
+  p.mat = cor_pmat(numericVars2),
+  colors = c("#0571b0", "#ffffff", "#ca0020"),
+  type="lower",
+  insig = "pch") +  
+    labs(title = "Correlation across numeric variables")+plotTheme()
 ```
 
 ## Map Home Price
