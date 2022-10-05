@@ -46,11 +46,11 @@ options(tigris_class = "sf")
 source("https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/functions.r")
 
 palette5 <- c("#0571b0","#92c5de","#ffffbf","#f4a582","#ca0020")
+
+setwd("~/Github/508_houseprice_prediction")
 ```
 
-```{r set_directory,include=FALSE}
-setwd("C:/Users/yyp/Desktop/Upenn/MUSA/courses/MUSA5080/Midterm")
-```
+
 
 ```{r load_key, warning = FALSE,message=FALSE}
 census_api_key("c1c749a5ad57fa58fe19e1403d894e9acef41a97", install=TRUE,overwrite = TRUE)
@@ -60,7 +60,7 @@ census_api_key("c1c749a5ad57fa58fe19e1403d894e9acef41a97", install=TRUE,overwrit
 ### 2.1.1 Data loading
 ```{r raw_data}
 #Raw Data:
-data<-st_read("./data/studentData.geojson")
+data<-st_read("~/Github/508_houseprice_prediction/data/studentData.geojson")
 
 #Add age,pricepersq,bathrooms
 data<-data %>% mutate(AGE = 2022-yearbuilt,
@@ -72,25 +72,13 @@ data<-data %>% mutate(AGE = 2022-yearbuilt,
 #download open data,crs=4326(?ESRI:103500)
 
 #Census Tract:
-tract<-st_read('./data/CensusTract/Census_Tracts_2020.shp')
+tract<-st_read('~/Github/508_houseprice_prediction/data/CensusTract/Census_Tracts_2020.shp')
 tract<-tract %>% st_transform(crs=4326)
 
 #Zipcode:
 ##用于neighborhood effects分析
-zipcode<-st_read('./data/zipcode/Zipcode.shp')
+zipcode<-st_read('~/Github/508_houseprice_prediction/data/zipcode/Zipcode.shp')
 zipcode<-zipcode %>% st_transform(crs=4326) %>% rename(shapeLeng = shape_Leng,shapeArea = shape_Area) %>% dplyr::select(zip,po_name,shapeLeng,shapeArea)
-```
-
-```{r}
-ggplot()+
-  geom_sf(data=st_union(zipcode))+
-  geom_sf(data=park_amenities.sf)
-```
-
-```{r}
-ggplot()+
-  geom_sf(data=st_union(tract))+
-  geom_sf(data=park_easement.sf)
 ```
 
 ```{r amenity_facility_feature,warning=FALSE}
@@ -133,14 +121,30 @@ park_amenities.sf<-park_amenities%>% st_transform(crs=4326)%>% dplyr::select(geo
 park_easement<-st_read('./data/park_easement/ParkEasements.shp')
 park_easement.sf<-park_easement%>% st_transform(crs=4326)%>%st_centroid() %>% dplyr::select(geometry) %>% na.omit()
 
-#10.Capital Improvement Projects:
+#10.park location:
+park_location <- st_read('./data/Park_Locations/Park_Locations.shp')
+park_location.sf <- park_location %>% st_transform(crs=4326)%>%st_centroid() %>% dplyr::select(geometry) %>% na.omit()
+
+
+#11.Capital Improvement Projects:
 capital_improve<-st_read('./data/Capital_Improvement_Projects/Capital_Improvement_Projects.shp')
 capital_improve.sf<-capital_improve %>% st_transform(crs=4326)%>% dplyr::select(geometry) %>% na.omit() 
 
-#11.Business Investment Opportunity Zones:
+#12.Business Investment Opportunity Zones:
 ##这个=做binary指标。原始数据是polygon;考虑使用buffer?
 business_invest<-st_read('./data/Business/Business_Investment_Opportunity_Zones.shp')
 business_invest<-business_invest %>% st_transform(crs=4326)
+```
+
+```{r}
+ggplot()+
+  geom_sf(data=st_union(zipcode))+
+  geom_sf(data=park_amenities.sf)
+```
+```{r}
+ggplot()+
+  geom_sf(data=st_union(tract))+
+  geom_sf(data=park_easement.sf)
 ```
 
 ```{r neighborhood_effects_factor_and_clean}
@@ -160,27 +164,23 @@ long_commute<-long_commute %>% st_transform(crs=4326) %>% mutate(PctLongCommute 
 grocery<-st_read('./data/Proximity to a Grocery Store.geojson')
 Pctgrocery<-grocery %>% st_transform(crs=4326) %>% mutate(Pctgrocery = X2021) %>%  dplyr::select(Pctgrocery)
 
-#4.Percent of canopy in residential area:
-canopy<-st_read('./data/Tree Canopy - Residential.geojson')
-Pctcanopy<-canopy %>% st_transform(crs=4326) %>% mutate(Pctcanopy = X2012) %>% dplyr::select(Pctcanopy)
-
-#5.Percent of Test Proficiency in Elementary Schools:
+#4.Percent of Test Proficiency in Elementary Schools:
 test_elementary<-st_read('./data/Test Proficiency - Elementary School.geojson')
 Pcttest1<-test_elementary%>% st_transform(crs=4326) %>%mutate( test.elementary = X2019) %>% dplyr::select(test.elementary)
 
-#6.Percent of Test Proficiency in Middle Schools:
+#5.Percent of Test Proficiency in Middle Schools:
 test_middle<-st_read('./data/Test Proficiency - Middle School.geojson')
 Pcttest2<-test_middle%>% st_transform(crs=4326) %>%mutate( test.middle = X2019) %>% dplyr::select(test.middle)
 
-#7.Percent of Test Proficiency in High Schools:
+#6.Percent of Test Proficiency in High Schools:
 test_high<-st_read('./data/Test Proficiency - High School.geojson')
 Pcttest3<-test_high%>% st_transform(crs=4326) %>% mutate(test.high = X2019) %>% dplyr::select(test.high)
 
-#8.Percent of Bachelor's Degree:
+#7.Percent of Bachelor's Degree:
 bachelor<-st_read('./data/Education Level - Bachelor Degree.geojson')
 PctBachelor<-bachelor %>% st_transform(crs=4326) %>% mutate(PctBachelor = X2020) %>% dplyr::select(PctBachelor)
 
-#9.Median Age of Residents:
+#8.Median Age of Residents:
 age<-st_read('./data/Age of Residents.geojson')
 MedAge<-age %>% st_transform(crs=4326) %>% mutate(MedAge = X2020) %>% dplyr::select(MedAge)
 ```
@@ -231,7 +231,6 @@ ggplot()+
 data<-st_join(data,crime1)
 data<-st_join(data,long_commute)
 data<-st_join(data,Pctgrocery)
-data<-st_join(data,Pctcanopy)
 data<-st_join(data,Pcttest1)
 data<-st_join(data,Pcttest2)
 data<-st_join(data,Pcttest3)
@@ -325,11 +324,11 @@ data <-
 data <-
   data %>% 
   mutate(
-    park_easement_nn1 = nn_function(st_c(data),st_c(park_easement.sf), 1),
-    park_easement_nn2 = nn_function(st_c(data),st_c(park_easement.sf), 2),
-    park_easement_nn3 = nn_function(st_c(data),st_c(park_easement.sf), 3),
-    park_easement_nn4 = nn_function(st_c(data),st_c(park_easement.sf), 4),
-    park_easement_nn5 = nn_function(st_c(data),st_c(park_easement.sf), 5),
+    park_location_nn1 = nn_function(st_c(data),st_c(park_location.sf), 1),
+    park_location_nn2 = nn_function(st_c(data),st_c(park_location.sf), 2),
+    park_location_nn3 = nn_function(st_c(data),st_c(park_location.sf), 3),
+    park_location_nn4 = nn_function(st_c(data),st_c(park_location.sf), 4),
+    park_location_nn5 = nn_function(st_c(data),st_c(park_location.sf), 5),
     )
 
 #10.Capital Improvement Projects:
@@ -344,19 +343,7 @@ data <-
     )
 ```
 
-```{r eval=FALSE}
-#8.park_amenities:
-###这个需要将三围点变成二维点
-data0 <-
-  data0 %>% 
-  mutate(
-    park_amenities_nn1 = nn_function(st_c(data0),st_c(park_amenities.sf), 1),
-    park_amenities_nn2 = nn_function(st_c(data0),st_c(park_amenities.sf), 2),
-    park_amenities_nn3 = nn_function(st_c(data0),st_c(park_amenities.sf), 3),
-    park_amenities_nn4 = nn_function(st_c(data0),st_c(park_amenities.sf), 4),
-    park_amenities_nn5 = nn_function(st_c(data0),st_c(park_amenities.sf), 5),
-    )
-```
+
 
 ### 2.1.3 Split dataset
 ```{r challenge_set}
@@ -368,13 +355,25 @@ challenge_set<-data %>% filter(price==0)
 #model_set:建模组,crs=4326
 model_set<-data %>% filter(price!=0)
 ```
-
 ## 2.2 Summary Statistics of Features
 
 model_set internal features
 ```{r summary_internal_features}
 #Summary and selection of internal features:
-internal.features<-model_set%>% dplyr::select(price,shape_Area,pricepersq,AGE,heatedarea,numfirepla,fullbaths,halfbaths,bedrooms,units) %>% st_drop_geometry()
+internal.variable <- c("price",
+                "shape_Area",
+                "pricepersq",
+                "AGE",
+                "heatedarea",
+                "numfirepla",
+                "fullbaths",
+                "halfbaths",
+                "bedrooms",
+                "units")
+
+internal.features<-model_set[internal.variable] %>%
+  st_drop_geometry()
+
 
 #stargazer:
 stargazer(internal.features, type = "html", 
@@ -394,10 +393,34 @@ ggcorrplot(
   colors = c("#0571b0", "#ffffff", "#ca0020"),
   type="lower",
   insig = "pch") +  
-    labs(title = "Correlation across numeric variables")+plotTheme()
+    labs(title = "Correlation across numeric variables\n(internal features)\n")+plotTheme()
 ```
+remove AGE, units is a good feature do not have strong correlation with other features and have strong corelation with price.
+```{r}
+sel.internal.list <-  c("price",
+                "shape_Area",
+                "pricepersq",
+                "heatedarea",
+                "numfirepla",
+                "fullbaths",
+                "halfbaths",
+                "bedrooms",
+                "units")
+```
+
+
 ```{r summary_amenities_feature}
-amenities_feature.list<-data %>% dplyr::select(starts_with('daycare_'),starts_with('MedicalFacilities_'),starts_with('hist_c'),starts_with('park_'),starts_with('capital_'),starts_with('Pct'),starts_with('test.e'),pctTotalVacant, pctRenterOccupied, pctWhite,pctPoverty,MedRent ,MedHHInc,MedAge) %>% st_drop_geometry()
+amenities_feature.list<-data %>% dplyr::select(
+  starts_with('college_'),
+  starts_with('daycare_'),
+  starts_with('MedicalFacilities_'),
+  starts_with('library_'),
+  starts_with('hist_'),
+  starts_with('church'),
+  starts_with('park_'),
+  starts_with('capital_'),
+  price) %>% 
+  st_drop_geometry()
 
 #stargazer:
 stargazer(amenities_feature.list, type = "html", 
@@ -405,18 +428,103 @@ stargazer(amenities_feature.list, type = "html",
           header = FALSE,
           single.row = TRUE)
 ```
-
 ```{r amenities_feature_matrix}
-numericVars2 <- 
-  select_if(amenities_feature.list, is.numeric) %>% na.omit()
-
 ggcorrplot(
-  round(cor(numericVars2), 1), 
-  p.mat = cor_pmat(numericVars2),
+  round(cor(amenities_feature.list), 1), 
+  p.mat = cor_pmat(amenities_feature.list),
   colors = c("#0571b0", "#ffffff", "#ca0020"),
   type="lower",
   insig = "pch") +  
-    labs(title = "Correlation across numeric variables")+plotTheme()
+  labs(title = "Correlation across numeric variables\n(amenity features)\n")+plotTheme()+
+  theme(axis.title.x = element_text(size=3),axis.title.y = element_text(size=3))
+```
+
+```{r}
+sel.amenitie<-data %>% dplyr::select(
+  starts_with('college_'),
+  starts_with('daycare_'),
+  starts_with('MedicalFacilities_'),
+  starts_with('library_'),
+  starts_with('hist_'),
+  starts_with('church'),
+  starts_with('capital_'),
+  price) %>% 
+  st_drop_geometry()
+```
+
+
+
+```{r}
+tract.list <- c("pctTotalVacant", "pctRenterOccupied", "pctWhite","pctPoverty","MedRent" ,"MedHHInc","MedAge","crime_sum", "PctLongCommute", "Pctgrocery", "test.elementary","test.middle", "test.high","PctBachelor","MedAge",'price')
+
+tract_feature.list<-data[tract.list]%>% 
+  st_drop_geometry()
+
+```
+
+```{r amenities_feature_matrix}
+numeric.tract<- 
+  select_if(tract_feature.list, is.numeric) %>% na.omit()
+
+ggcorrplot(
+  round(cor(numeric.tract), 1), 
+  p.mat = cor_pmat(numeric.tract),
+  colors = c("#0571b0", "#ffffff", "#ca0020"),
+  type="lower",
+  insig = "pch") +  
+  labs(title = "Correlation across numeric variables\n public service features\n")+plotTheme()+
+  theme(axis.title.x = element_text(size=3),axis.title.y = element_text(size=3))
+
+
+sel.tract.list<- c( "pctRenterOccupied", "pctWhite","pctPoverty","MedRent" ,"MedHHInc","MedAge","crime_sum", "PctLongCommute", "Pctgrocery",  "test.high","PctBachelor","MedAge",'price')
+```
+## 2.3 Regression for Feature Selection
+### 2.3.1 non numeric Feature Selection
+
+
+```{r}
+numeric<- select_if(data, is.numeric)%>% na.omit()%>% 
+  st_drop_geometry()
+```
+!(data %in% c(value1, value2, value3, ...))
+
+```{r}
+nonnumeric <- select_if(data, !(colnames(data)%in% colnames(numeric)))
+```
+
+```{r}
+names(nonnumeric)
+```
+```{r}
+a = ls()
+rm(list=a[which(a!='data' & a !='sel.internal.list' & a !='sel.tract.list' & a !='sel.amenitie')])
+```
+
+```{r}
+
+nonnumeric.feature1 <- c("descbuildi", "storyheigh", "aheatingty", "heatedfuel", "extwall", "foundation", "bldggrade","price")
+
+nonnumeric <- data[nonnumeric.feature]%>% 
+  st_drop_geometry()
+  
+```
+"stname", "sttype",  "city", "state",  
+
+```{r}
+M1 <- lm(price ~ ., data = nonnumeric)
+
+```
+
+```{r}
+M2 <- lm(price ~ ., data = data[sel.internal.list])
+```
+
+```{r}
+M3 <- lm(price ~ ., data = data[sel.tract.list])
+```
+
+```{r}
+M4 <- lm(price ~., data = sel.amenitie)
 ```
 
 ## Map Home Price
