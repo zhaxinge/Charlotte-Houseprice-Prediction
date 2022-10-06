@@ -410,7 +410,7 @@ sel.internal.list <-  c("price",
 
 
 ```{r summary_amenities_feature}
-amenities_feature.list<-data %>% dplyr::select(
+amenities_feature.list<-model_set %>% dplyr::select(
   starts_with('college_'),
   starts_with('daycare_'),
   starts_with('MedicalFacilities_'),
@@ -440,7 +440,7 @@ ggcorrplot(
 ```
 
 ```{r}
-sel.amenitie<-data %>% dplyr::select(
+sel.amenitie<-model_set%>% dplyr::select(
   starts_with('college_'),
   starts_with('daycare_'),
   starts_with('MedicalFacilities_'),
@@ -457,7 +457,7 @@ sel.amenitie<-data %>% dplyr::select(
 ```{r}
 tract.list <- c("pctTotalVacant", "pctRenterOccupied", "pctWhite","pctPoverty","MedRent" ,"MedHHInc","MedAge","crime_sum", "PctLongCommute", "Pctgrocery", "test.elementary","test.middle", "test.high","PctBachelor","MedAge",'price')
 
-tract_feature.list<-data[tract.list]%>% 
+tract_feature.list<-model_set[tract.list]%>% 
   st_drop_geometry()
 
 ```
@@ -497,14 +497,16 @@ names(nonnumeric)
 ```
 ```{r}
 a = ls()
-rm(list=a[which(a!='data' & a !='sel.internal.list' & a !='sel.tract.list' & a !='sel.amenitie')])
+rm(list=a[which(a!='data' & a !='sel.internal.list' & a !='sel.tract.list' & a !='sel.amenitie' & a!='challenge_set'& a!= 'model_set')])
 ```
+
+
 
 ```{r}
 
 nonnumeric.feature1 <- c("descbuildi", "storyheigh", "aheatingty", "heatedfuel", "extwall", "foundation", "bldggrade","price")
 
-nonnumeric <- data[nonnumeric.feature]%>% 
+nonnumeric <- model_set %>% dplyr::select(nonnumeric.feature1)%>% 
   st_drop_geometry()
   
 ```
@@ -512,19 +514,33 @@ nonnumeric <- data[nonnumeric.feature]%>%
 
 ```{r}
 M1 <- lm(price ~ ., data = nonnumeric)
-
 ```
 
 ```{r}
-M2 <- lm(price ~ ., data = data[sel.internal.list])
+summary(M1)
 ```
 
 ```{r}
-M3 <- lm(price ~ ., data = data[sel.tract.list])
+sel.internal<-model_set %>% dplyr::select(sel.internal.list) %>% st_drop_geometry()
+
+
+M2 <- lm(price ~ ., data = sel.internal)
+```
+```{r}
+summary(M2)
+```
+
+```{r}
+sel.tract<-model_set %>% dplyr::select(sel.tract.list) %>% st_drop_geometry()
+M3 <- lm(price ~ ., data = sel.tract)
+
+summary(M3)
 ```
 
 ```{r}
 M4 <- lm(price ~., data = sel.amenitie)
+
+summary(M4)
 ```
 
 ## Map Home Price
