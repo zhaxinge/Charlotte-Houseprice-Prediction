@@ -50,8 +50,6 @@ palette5 <- c("#0571b0","#92c5de","#ffffbf","#f4a582","#ca0020")
 setwd("~/Github/508_houseprice_prediction")
 ```
 
-
-
 ```{r load_key, warning = FALSE,message=FALSE}
 census_api_key("c1c749a5ad57fa58fe19e1403d894e9acef41a97", install=TRUE,overwrite = TRUE)
 ```
@@ -139,8 +137,20 @@ business_invest<-business_invest %>% st_transform(crs=4326)
 ```{r}
 ggplot()+
   geom_sf(data=st_union(zipcode))+
-  geom_sf(data=park_amenities.sf)
+  geom_sf(data=business_invest)
 ```
+
+```{r}
+business_invest_union<-business_invest %>% st_union() %>% st_sf()
+
+isin<-st_within(data,business_invest_union) %>% lengths>0
+
+isin<-data.frame(isin)
+
+data<-cbind(data,isin)
+```
+
+
 ```{r}
 ggplot()+
   geom_sf(data=st_union(tract))+
@@ -399,7 +409,6 @@ remove AGE, units is a good feature do not have strong correlation with other fe
 ```{r}
 sel.internal.list <-  c("price",
                 "shape_Area",
-                "pricepersq",
                 "heatedarea",
                 "numfirepla",
                 "fullbaths",
@@ -428,6 +437,7 @@ stargazer(amenities_feature.list, type = "html",
           header = FALSE,
           single.row = TRUE)
 ```
+
 ```{r amenities_feature_matrix}
 ggcorrplot(
   round(cor(amenities_feature.list), 1), 
@@ -440,6 +450,7 @@ ggcorrplot(
 ```
 
 ```{r}
+#Amenities
 sel.amenitie<-model_set%>% dplyr::select(
   starts_with('college_'),
   starts_with('daycare_'),
@@ -452,9 +463,8 @@ sel.amenitie<-model_set%>% dplyr::select(
   st_drop_geometry()
 ```
 
-
-
 ```{r}
+#Tract Feature
 tract.list <- c("pctTotalVacant", "pctRenterOccupied", "pctWhite","pctPoverty","MedRent" ,"MedHHInc","MedAge","crime_sum", "PctLongCommute", "Pctgrocery", "test.elementary","test.middle", "test.high","PctBachelor","MedAge",'price')
 
 tract_feature.list<-model_set[tract.list]%>% 
@@ -476,10 +486,70 @@ ggcorrplot(
   theme(axis.title.x = element_text(size=3),axis.title.y = element_text(size=3))
 
 
-sel.tract.list<- c( "pctRenterOccupied", "pctWhite","pctPoverty","MedRent" ,"MedHHInc","MedAge","crime_sum", "PctLongCommute", "Pctgrocery",  "test.high","PctBachelor","MedAge",'price')
+sel.tract.list<- c( "pctRenterOccupied", "pctWhite","pctPoverty","MedRent" ,"MedHHInc","MedAge","crime_sum", "PctLongCommute", "Pctgrocery",  "test.elementary","PctBachelor","MedAge",'price')
 ```
+
+```{r histogram_train_feature}
+model_set %>% 
+  st_drop_geometry() %>% 
+  dplyr::select(price,extwall,storyheigh,heatedfuel,aheatingty,bldggrade) %>%
+   filter(price <= 5000000) %>%
+  gather(Variable, Value, -price) %>% 
+   ggplot(aes(Value, price)) +
+     geom_bar(position = "dodge", stat = "summary", fun = mean) +
+     facet_wrap(~Variable, ncol = 3, scales = "free") +
+     labs(title = "Price as a function of\ncategorical variables", y = "Mean_Price") +
+     theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r feature_enginneering_nonnumeric}
+# 1.Modify extwall:
+extwall.stone<-c("STONE")
+data <- 
+  data %>%
+  mutate(extwall.m = ifelse(extwall %in% extwall.stone,"STONE","Non-STONE"))
+
+# 2.Modify Aheatingty:
+hotwater<-c("HOT WATER")
+data<-data %>% mutate(aheatingty.m = ifelse(aheatingty %in% hotwater,"HOT WATER","ELSE" ))
+
+# 3.Modify heatedfuel:
+gas<-c("GAS")
+data<-data %>% mutate(heatedfuel.m = ifelse(heatedfuel %in% gas,"GAS","ELSE" ))
+
+# 4.Modify bldggrade
+fairplus<-c("FAIR","MINIMUM","NA")
+data<-data %>% mutate(bldggrade.m = ifelse(bldggrade %in% fairplus,"ELSE",bldggrade))
+
+# 5.Modify storyheigh
+storyelse<-c("NA","SPLIT LEVEL","BI-LEVEL","CAPE COD","RANCH W/BSMT")
+data<-data %>% mutate(storyheigh.m = ifelse(storyheigh %in% storyelse,"ELSE",storyheigh ))
+```
+
+
+
 ## 2.3 Regression for Feature Selection
 ### 2.3.1 non numeric Feature Selection
+
+```{r}
+outlier<-data %>% filter(price>2200000)
+```
+
+```{r}
+ggplot()+
+  geom_sf(data=st_union(tract))+
+  geom_sf(data=outlier)
+```
+
+```{r challenge_set}
+#challenge_set:用于最后预测的组，crs=4326
+challenge_set<-data %>% filter(price==0)
+```
+
+```{r model_set}
+#model_set:建模组,crs=4326
+model_set<-data %>% filter(price!=0)
+```
 
 
 ```{r}
@@ -495,52 +565,130 @@ nonnumeric <- select_if(data, !(colnames(data)%in% colnames(numeric)))
 ```{r}
 names(nonnumeric)
 ```
-```{r}
-a = ls()
-rm(list=a[which(a!='data' & a !='sel.internal.list' & a !='sel.tract.list' & a !='sel.amenitie' & a!='challenge_set'& a!= 'model_set')])
+
+```{r,eval=FALSE}
+#删除不再使用的数据集合
+#a = ls()
+#rm(list=a[which(a!='data' & a !='sel.internal.list' & a !='sel.tract.list' & a !='sel.amenitie' & a!='challenge_set'& a!= 'model_set')])
 ```
 
-
-
 ```{r}
-
-nonnumeric.feature1 <- c("descbuildi", "storyheigh", "aheatingty", "heatedfuel", "extwall", "foundation", "bldggrade","price")
-
-nonnumeric <- model_set %>% dplyr::select(nonnumeric.feature1)%>% 
-  st_drop_geometry()
-  
+#非数字的列
+nonnumeric.feature1 <- c("descbuildi", "storyheigh.m", "aheatingty.m", "heatedfuel.m", "extwall.m", "foundation", "bldggrade.m","isin","price")
 ```
 "stname", "sttype",  "city", "state",  
 
-```{r}
-M1 <- lm(price ~ ., data = nonnumeric)
+## 4.1 Dataset Splitting and Model Building
+
+```{r model_set_split,warning=FALSE}
+#1.Split Model Set:
+set.seed(7278)
+
+# get index for training sample:
+inTrain<-caret::createDataPartition(
+  y = paste(model_set$storyheigh,model_set$extwall,model_set$bldggrade,model_set$price),
+  p = .60, 
+  list=FALSE)
+
+# split model_set into train and test
+model_set.train<-model_set[inTrain,] %>% filter(price<=2200000)
+model_set.test<-model_set[-inTrain,]
 ```
 
 ```{r}
+#non-numeric feature
+nonnumeric <- model_set.train %>% dplyr::select(nonnumeric.feature1)%>% 
+  st_drop_geometry()
+```
+
+```{r M1_nonnumeric}
+#第一个lm:回归非数字类型的列
+M1 <- lm(price ~ ., data = nonnumeric)
+
 summary(M1)
 ```
 
-```{r}
-sel.internal<-model_set %>% dplyr::select(sel.internal.list) %>% st_drop_geometry()
-
-
+```{r M2_internal_feature}
+# internal feature
+sel.internal<-model_set.train %>% dplyr::select(sel.internal.list) %>% st_drop_geometry()
 M2 <- lm(price ~ ., data = sel.internal)
-```
-```{r}
+
 summary(M2)
 ```
 
-```{r}
-sel.tract<-model_set %>% dplyr::select(sel.tract.list) %>% st_drop_geometry()
+```{r M3_tract_feature}
+sel.tract<-model_set.train %>% dplyr::select(sel.tract.list) %>% st_drop_geometry()
 M3 <- lm(price ~ ., data = sel.tract)
 
 summary(M3)
 ```
 
-```{r}
-M4 <- lm(price ~., data = sel.amenitie)
+```{r }
+sel.amenitie1<-model_set.train%>% dplyr::select(
+  starts_with('college_'),
+  starts_with('daycare_'),
+  starts_with('MedicalFacilities_'),
+  starts_with('library_'),
+  starts_with('hist_'),
+  starts_with('church'),
+  starts_with('capital_'),
+  price) %>% 
+  st_drop_geometry()
+
+M4 <- lm(price ~., data = sel.amenitie1)
 
 summary(M4)
+```
+
+```{r}
+train_set.1<-model_set.train %>% dplyr::select(
+  price,
+  #Non-numeric Feature
+  descbuildi,bldggrade,
+  #Internal Feature
+  shape_Area , heatedarea , numfirepla , halfbaths , fullbaths , bedrooms , units,
+  #Tract Feature
+  pctRenterOccupied , pctWhite , pctPoverty , MedRent , MedHHInc , PctLongCommute, Pctgrocery, PctBachelor, test.high,
+  #Amenities Feature
+  college_nn2, daycare_nn5,MedicalFacilities_nn5,library_nn5,hist_cemeteries_nn1,hist_properties_nn4, hist_properties_nn5,capital_improve_nn2,capital_improve_nn3,capital_improve_nn4,capital_improve_nn5) %>% st_drop_geometry()
+
+M5 <- lm(price ~ ., data = train_set.1)
+
+summary(M5)
+```
+
+```{r backup}
+train_set.2<-model_set.train %>% dplyr::select(
+  price,
+  #Non-numeric Feature
+  bldggrade.m,storyheigh.m,foundation,
+  #Internal Feature
+  shape_Area ,heatedarea, numfirepla,fullbaths,halfbaths, bedrooms , units,
+  #Tract Feature
+  pctRenterOccupied , pctWhite ,pctPoverty,MedHHInc ,test.elementary,PctBachelor,crime_sum,PctLongCommute,Pctgrocery,
+  #Amenities Feature
+  college_nn5,daycare_nn1,MedicalFacilities_nn4,MedicalFacilities_nn5,library_nn3,library_nn4,library_nn2,hist_properties_nn5,capital_improve_nn3,capital_improve_nn4,capital_improve_nn5) %>% st_drop_geometry()
+
+M6 <- lm(price ~ ., data = train_set.2)
+
+summary(M6)
+```
+
+```{r all_features}
+train_set.lipu<-model_set.train %>% dplyr::select(price,
+  nonnumeric.feature1,sel.internal.list,sel.tract.list,
+  starts_with('college_'),
+  starts_with('daycare_'),
+  starts_with('MedicalFacilities_'),
+  starts_with('library_'),
+  starts_with('hist_'),
+  starts_with('church'),
+  starts_with('capital_')
+) %>% st_drop_geometry()
+
+M_0 <- lm(price ~ ., data = train_set.lipu)
+
+summary(M_0)
 ```
 
 ## Map Home Price
