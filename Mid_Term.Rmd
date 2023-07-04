@@ -1,0 +1,1498 @@
+---
+title: "Midterm - Predicting Housing Prices"
+author: "Yiping Ying & Xinge Zhang"
+date: "2022-09-27"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+    fig_width: 10
+    fig_height: 8
+    theme: united
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# I.Introduction and Motivation
+
+[**Mecklenburg County**](https://en.wikipedia.org/wiki/Mecklenburg_County,_North_Carolina) is a county located in the southwestern region of the state of North Carolina, in the United States. As of the 2020 census, the population was 1,115,482, making it the second-most populous county in North Carolina. Its county seat is Charlotte, the state's largest city. Between 2004 and 2014, Charlotte was ranked as the country's fastest-growing metro area, with 888,000 new residents.Based on U.S. Census data from 2005 to 2015, Charlotte tops the U.S. in millennial population growth, which indicates a growing demand in the housing market for the next decade. From this point of view, it is important to make a model that is adapted to local indicators and can accurately predict house prices.
+
+In August 2022, Mecklenburg County home prices were up 15.1% compared to last year, selling for a median price of \$420K. There were 1,723 homes sold in August this year, down from 2,131 last year. Across the nation, 0.96% of homebuyers searched to move into Charlotte from outside metros. 76% of Charlotte homebuyers searched to stay within the Charlotte metropolitan area.
+
+We can see that even though the up-going price holds people from buying houses a little bit, the demand for homes is still robust. Homebuyers in Mecklenburg County mainly aim to relocate and stay in the metropolitan area. This group of buyers, who are already familiar with the different local resources in Charlotte, will be very conscious of the availability of various public amenities in the area and the quality of the home. we bring in the amenities feature and the building features from their perspectives. There are also immigrants from big cities like New York willing to move to Charlotte. This group of people might consider the basic context of the region. Therefore, census tract data are also important to analysis.
+
+We also refer to **Zillow** and **Redfin**'s analysis of the [**local market**](https://www.redfin.com/city/3105/NC/Charlotte/housing-market), fully consider the price stratification of the house price market as well as the the property itself. Different from zillow and redfin's predicted valuation, our model focuses on the prediction specific on the local market. This forecast will not consider the impact of time series changes on prices, due to the already clear challenge set as well as time nodes. We will also discard the top houses as training data based on the location of the forecast points inferring the price stratum to which they belong.
+
+
+# II.Data Manipulation and Visualization
+
+## 2.0 Set Up
+
+In this section, we loaded necessary libraries, created plot theme options and map theme options, and identified functions of quantile breaks, and average nearest neighbor distance for further analysis.
+
+```{r Load Libraries, echo=TRUE, message=FALSE, warning=FALSE, results = FALSE}
+
+# You can set some global options for knitting chunks
+
+knitr::opts_chunk$set(echo = TRUE)
+
+# Load some libraries
+
+library(tidyverse)
+library(sf)
+library(spdep)
+library(caret)
+library(ckanr)
+library(FNN)
+library(grid)
+library(gridExtra)
+library(ggcorrplot) # plot correlation plot
+library(corrr)      # another way to plot correlation plot
+library(kableExtra)
+library(jtools)     # for regression model plots
+library(ggstance) # to support jtools plots
+library(ggpubr)    # plotting R^2 value on ggplot point scatter
+library(broom.mixed) # needed for effects plots
+library(stargazer)
+library(tidycensus)
+
+options(scipen = 999)
+options(tigris_class = "sf")
+
+# functions and data directory
+
+source("https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/functions.r")
+
+palette3 <- c('#ffffd4','#fed98e','#fe9929','#d95f0e','#993404')
+palette4 <- c('#4575b4', '#fecc5c')
+palette5<-c('#fc8d59','#fee090','#ffffbf','#e0f3f8','#91bfdb')
+palette2<-c ('#eff3ff','#bdd7e7','#6baed6','#3182bd','#08519c')
+
+plotTheme <- function(base_size = 12, title_size = 16) {
+  theme(
+    text = element_text( color = "black"),
+    plot.title = element_text(size = title_size, colour = "black"), 
+    plot.subtitle = element_text(face="italic"),
+    plot.caption = element_text(hjust=0),
+    axis.ticks = element_blank(),
+    panel.background = element_blank(),
+    panel.grid.minor = element_line("grey90", size = 0.01),
+    panel.grid.major = element_line("grey90", size = 0.01),
+    panel.border = element_rect(colour = "white" , fill=NA, size=0),
+    strip.background = element_rect(color = "white",fill='white'),
+    strip.text = element_text(size=12),
+    axis.title = element_text(size=12),
+    axis.text = element_text(size=10),
+    plot.background = element_blank(),
+    legend.background = element_blank(),
+    legend.title = element_text(colour = "black", face = "italic"),
+    legend.text = element_text(colour = "black", face = "italic"),
+    strip.text.x = element_text(size = 14)
+  )
+}
+
+mapTheme <- function(base_size = 12, title_size = 16) {
+  theme(
+    text = element_text( color = "black"),
+    plot.title = element_text(size = title_size,colour = "black"),
+    plot.subtitle=element_text(face="italic"),
+    plot.caption=element_text(hjust=0),
+    axis.ticks = element_blank(),
+    panel.background = element_blank(),
+    axis.title = element_blank(),
+    axis.text = element_blank(),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    strip.text.x = element_text(size = 14),
+    strip.background = element_rect(fill = "white"))
+}
+setwd("~/Github/508_houseprice_prediction")
+census_api_key("c1c749a5ad57fa58fe19e1403d894e9acef41a97", install=TRUE,overwrite = TRUE)
+```
+
+
+## 2.1 Data Wrangling
+
+In this section, we loaded Mecklenburg data and other complementary datasets, conducted feature selection and engineering. Besides, for analysis, we separate the whole dataset into challenge_set and model_set in advance.
+
+### 2.1.1 Data loading
+
+Seven tract-related datasets were used in this project:
+
+-   [**Long_commute**](https://mcmap.org/qol/#33/): Percentage of auto commuters traveling 20 minutes or more to work
+
+-   [**Crime**](https://mcmap.org/qol/#58/): crime violent incidences in tracts.
+
+-   [**Pctgrocery**](https://mcmap.org/qol/#45/): Percentage of housing units within ½-mile of a full-service, chain grocery store.
+
+-   [**Pcttest1\2\3**](https://mcmap.org/qol/#62/): Percentage of Charlotte-Mecklenburg Schools (CMS) students in grades 3-5 \ 6-8 \ 9-12 proficient in End of Grade testing
+
+-   [**Bachelor**](https://mcmap.org/qol/#20/): Percent of Bachelor's Degree
+
+-   [**Age**](https://mcmap.org/qol/#2/): Median Age of Residents
+
+-   **Census Data**: demographic variables from the ACS 2020 for census tracts in Mecklenburg County. We specifically selected 8 variables in the analysis:
+
+    -   `TotalPop`: Total population in each census tract
+    -   `Whites`: White population in each census tract
+    -   `MedHHInc`: Median household income in each census tract
+    -   `MedRent`: Median Rent for properties in each census tract
+    -   `TotalPoverty`: Population living under the level of poverty in each census tract
+    -   `TotalVacant`: Total vacant unit in each census tract
+    -   `TotalUnit`: Total housing units in each census tract
+    -   `RenterOccpied`: Total householder lived in renter-occupied housing units
+
+    With variables above, we created the four features to be used in the model building.
+
+    -   `pctWhite`: white population proportion in each census tract
+    -   `pctPoverty`: Poverty population proportion in each census tract
+    -   `pctTotalVacant`: Vacant unites proportion in each census tract
+    -   `pctRenterOccupied`: Proportion of householder living in renter-occupied housing units in each census tract
+
+
+-   **Amenity Data**: compilatory [data](http://maps.co.mecklenburg.nc.us/openmapping/data.html) chosen for describing amenities and public service of Mecklenburg County. The datasets we chose encompasses Churches, Colleges and Universities, Libraries, Medical Facilities, Business Investment Opportunity Zones (Polygon),parks, daycare. See each dataset below:
+
+    1.  **Churches**: Churches dataset defines locations classified as religious organizations in Mecklenburg County, data is queried from Master Address Table..
+
+    2.  **Colleges and Universities**: Dataset contains public and private colleges and universities in Mecklenburg County.
+
+    3.  **Capital Improvement Projects**: Dataset identifies capital improvement projects for; Central Piedmont Community College, Charlotte-Mecklenburg Schools, Libraries, Park and Recreation, and other government facilities in Mecklenburg County.
+
+    4.  **Daycare**: Dataset provides NC DHHS licensed daycare locations in Mecklenburg County.
+
+    5.  **Historic Cemeteries**: This dataset represents historic and abandoned burial locations in Mecklenburg County, NC.
+
+    6.  **Historic Property National**: This dataset represents nationally-designated historic properties in Mecklenburg County, NC.
+
+    7.  **Libraries**: A point coverage of the Public Libraries of Charlotte-Mecklenburg, North Carolina system.
+
+    8.  **Medical Facilities**: This dataset was generated to publish a geospatial inventory of Medical Facilities in Mecklenburg County, NC. This data serves to support and assist the Charlotte Mecklenburg Planning Department, The City of Charlotte, and others in Urban Planning decisions.
+
+    9.  **Business Investment Opportunity Zones(Polygon)**: This dataset displays areas that are within a 1/4 mile of a commercial property that has a value 70% the County average and a median household income of \<= 55K in Mecklenburg County.
+
+    10. **Park Locations**: Mecklenburg County Park and Recreation park location entrance points.
+    
+*Notice: For the tract-related data, we get the relevant data by spatial joining the house price points with the track, and for the data based on FACILITIES distribution points, we assign values to the house price information points by the knn algorithm.*
+ 
+
+```{r load_data, message=FALSE, warning=FALSE, results = FALSE}
+#Raw Data:
+data<-st_read("~/Github/508_houseprice_prediction/data/studentData.geojson")
+
+#Add age,pricepersq,bathrooms
+data<-data %>% mutate(AGE = 2022-yearbuilt,
+                                pricepersq = price/heatedarea,
+                                bathrooms = fullbaths+halfbaths)
+#Census Tract:
+tract<-st_read('~/Github/508_houseprice_prediction/data/CensusTract/Census_Tracts_2020.shp')
+tract<-tract %>% st_transform(crs=4326)
+
+#Zipcode:
+zipcode<-st_read('~/Github/508_houseprice_prediction/data/zipcode/Zipcode.shp')
+zipcode<-zipcode %>% st_transform(crs=4326) %>% rename(shapeLeng = shape_Leng,shapeArea = shape_Area) %>% dplyr::select(zip,po_name,shapeLeng,shapeArea)
+
+# Amenities
+#1.college:
+college<-st_read('./data/college/Colleges.shp')
+college.sf<-college %>% st_transform(crs = 4326) %>% dplyr::select(geometry) %>% na.omit() 
+#2.daycare:
+daycare<-st_read('./data/daycare/Daycare.shp')
+daycare.sf<-daycare %>% st_transform(crs=4326)%>% dplyr::select(geometry) %>% na.omit() 
+
+#3.Medical Facilities:
+MedicalFacilities<-st_read('./data/medical/MedicalFacilities.shp')
+MedicalFacilities.sf<-MedicalFacilities %>% st_transform(crs=4326)%>% dplyr::select(geometry) %>% na.omit()
+
+#4.library:
+library<-st_read('./data/library/Library.shp')
+library.sf<-library %>% st_transform(crs=4326)%>% dplyr::select(geometry) %>% na.omit() 
+
+#5.Historical cemeteries:
+hist_cemeteries<-st_read('./data/historic_cemeteries/Historic_Cemeteries.shp')
+hist_cemeteries.sf<-hist_cemeteries %>% st_transform(crs=4326)%>% st_centroid() %>% dplyr::select(geometry) %>% na.omit() 
+
+#6.Historical Properties:
+hist_properties<-st_read('./data/historic_properties/HistoricProperty_National.shp')
+hist_properties.sf<-hist_properties%>% st_transform(crs=4326)%>%st_centroid() %>% dplyr::select(geometry) %>% na.omit() 
+
+#7.church
+church<-st_read('./data/church/Churches.shp')
+church.sf<-church %>% st_transform(crs=4326)%>% dplyr::select(geometry) %>% na.omit() 
+
+
+#8.park location:
+park_location <- st_read('./data/Park_Locations/Park_Locations.shp')
+park_location.sf <- park_location %>% st_transform(crs=4326)%>%st_centroid() %>% dplyr::select(geometry) %>% na.omit()
+
+
+#9.Capital Improvement Projects:
+capital_improve<-st_read('./data/Capital_Improvement_Projects/Capital_Improvement_Projects.shp')
+capital_improve.sf<-capital_improve %>% st_transform(crs=4326)%>% dplyr::select(geometry) %>% na.omit() 
+
+#10.Business Investment Opportunity Zones:
+business_invest<-st_read('./data/Business/Business_Investment_Opportunity_Zones.shp')
+business_invest<-business_invest %>% st_transform(crs=4326)
+business_invest_union<-business_invest %>% st_union() %>% st_sf()
+isin<-st_within(data,business_invest_union) %>% lengths>0
+isin<-data.frame(isin)
+data<-cbind(data,isin)
+
+#spatial features collection
+
+#1.Crime:
+crime<-st_read('./data/Crime - Violent.geojson')
+crime<-crime %>% st_transform(crs=4326)
+crime1<-crime %>% mutate(crime_sum = X2019.raw+X2020.raw+X2021.raw) %>%  dplyr::select(crime_sum) 
+
+#2.Long Commute:
+long_commute<-st_read('./data/LongCommute.geojson')
+long_commute<-long_commute %>% st_transform(crs=4326) %>% mutate(PctLongCommute = X2020) %>%  dplyr::select(PctLongCommute)
+
+#3.Percent of Grocery:
+grocery<-st_read('./data/Proximity to a Grocery Store.geojson')
+Pctgrocery<-grocery %>% st_transform(crs=4326) %>% mutate(Pctgrocery = X2021) %>%  dplyr::select(Pctgrocery)
+
+#4.Percent of Test Proficiency in Elementary Schools:
+test_elementary<-st_read('./data/Test Proficiency - Elementary School.geojson')
+Pcttest1<-test_elementary%>% st_transform(crs=4326) %>%mutate( test.elementary = X2019) %>% dplyr::select(test.elementary)
+
+#5.Percent of Test Proficiency in Middle Schools:
+test_middle<-st_read('./data/Test Proficiency - Middle School.geojson')
+Pcttest2<-test_middle%>% st_transform(crs=4326) %>%mutate( test.middle = X2019) %>% dplyr::select(test.middle)
+
+#6.Percent of Test Proficiency in High Schools:
+test_high<-st_read('./data/Test Proficiency - High School.geojson')
+Pcttest3<-test_high%>% st_transform(crs=4326) %>% mutate(test.high = X2019) %>% dplyr::select(test.high)
+
+#7.Percent of Bachelor's Degree:
+bachelor<-st_read('./data/Education Level - Bachelor Degree.geojson')
+PctBachelor<-bachelor %>% st_transform(crs=4326) %>% mutate(PctBachelor = X2020) %>% dplyr::select(PctBachelor)
+
+#8.Median Age of Residents:
+age<-st_read('./data/Age of Residents.geojson')
+MedAge<-age %>% st_transform(crs=4326) %>% mutate(MedAge = X2020) %>% dplyr::select(MedAge)
+```
+
+```{r census_data, message=FALSE, warning=FALSE, results = FALSE}
+options(tigris_use_cache = TRUE)
+
+acs_variable_list.2020 <- load_variables(2020, 
+                                         "acs5", 
+                                         cache = TRUE)
+
+tracts20 <- 
+  get_acs(geography = "tract", variables = c("B25026_001E","B02001_002E", "B19013_001E","B25058_001E","B06012_002E",                            
+"B25002_003E","B25004_002E","B25004_003E","B25004_004E","B25004_005E",
+"B25001_001E","B08137_003E"), 
+          year=2020, state= 37, county= 119, geometry=T, output="wide")%>% st_transform(crs=4326) %>%
+  rename(TotalPop = B25026_001E, 
+         Whites = B02001_002E,
+         MedHHInc = B19013_001E, 
+         MedRent = B25058_001E,
+         TotalPoverty = B06012_002E,
+         TotalVacant = B25002_003E,
+         ForRent = B25004_002E,
+         ForRentVac = B25004_003E,
+         ForSale = B25004_004E,
+         ForSaleVac = B25004_005E,
+         TotalUnit = B25001_001E,
+         RenterOccupied = B08137_003E
+         ) %>%
+  dplyr::select(-NAME, -starts_with("B")) %>% #-starts_with("B") awesome!
+  mutate(pctWhite = ifelse(TotalPop > 0, Whites / TotalPop,0),
+         pctPoverty = ifelse(TotalPop > 0, TotalPoverty / TotalPop, 0),
+         pctTotalVacant = ifelse(TotalUnit > 0, TotalVacant / TotalUnit * 100, 0),
+         TotalOccupied = TotalUnit - TotalVacant,
+         pctRenterOccupied = ifelse(TotalOccupied >0, RenterOccupied/TotalOccupied, 0)) %>%
+  dplyr::select(-Whites, -TotalPoverty) 
+```
+
+### 2.1.2 Feature Engineering
+
+In this section, we created some new features to describe the amenities and public services in Mecklenburg County, as well as to each home sale observation's internal characteristics.
+
+First of all, we were aimed at creating features to measure **the extent to which buyers can assess multiple public services**, including Churches, Colleges and Universities, Libraries, Medical Facilities, parks, daycares. To utmost avoid scale bias triggered by setting arbitrary areal unit or fixed buffer distance of each home sale observation, we chose to calculate the average nearest neighbor distance from each home sale to its *k* nearest neighbor public services. Accordingly, the smaller the value is, the more possibility that the observation can access specific service. To better compare each feature's impact, we set the *k* from 3 to 5.
+
+
+
+```{r knn , message=FALSE, warning=FALSE, results = FALSE}
+
+data<-st_join(data,crime1)
+data<-st_join(data,long_commute)
+data<-st_join(data,Pctgrocery)
+data<-st_join(data,Pcttest1)
+data<-st_join(data,Pcttest2)
+data<-st_join(data,Pcttest3)
+data<-st_join(data,PctBachelor)
+data<-st_join(data,MedAge)
+data<-st_join(data,zipcode)
+data<-st_join(data,tracts20)
+
+
+st_c<-st_coordinates
+
+#1.college:
+data <-
+  data %>% 
+  mutate(
+    college_nn1 = nn_function(st_c(data),st_c(college.sf), 1),
+    college_nn2 = nn_function(st_c(data),st_c(college.sf), 2),
+    college_nn3 = nn_function(st_c(data),st_c(college.sf), 3),
+    college_nn4 = nn_function(st_c(data),st_c(college.sf), 4),
+    college_nn5 = nn_function(st_c(data),st_c(college.sf), 5),
+    ) 
+
+#2.daycare:
+data <-
+  data %>% 
+  mutate(
+    daycare_nn1 = nn_function(st_c(data),st_c(daycare.sf), 1),
+    daycare_nn2 = nn_function(st_c(data),st_c(daycare.sf), 2),
+    daycare_nn3 = nn_function(st_c(data),st_c(daycare.sf), 3),
+    daycare_nn4 = nn_function(st_c(data),st_c(daycare.sf), 4),
+    daycare_nn5 = nn_function(st_c(data),st_c(daycare.sf), 5),
+    )
+
+#3.Medical Facilities:
+data <-
+  data %>% 
+  mutate(
+    MedicalFacilities_nn1 = nn_function(st_c(data),st_c(MedicalFacilities.sf), 1),
+    MedicalFacilities_nn2 = nn_function(st_c(data),st_c(MedicalFacilities.sf), 2),
+    MedicalFacilities_nn3 = nn_function(st_c(data),st_c(MedicalFacilities.sf), 3),
+    MedicalFacilities_nn4 = nn_function(st_c(data),st_c(MedicalFacilities.sf), 4),
+    MedicalFacilities_nn5 = nn_function(st_c(data),st_c(MedicalFacilities.sf), 5),
+    )
+
+#4.library:
+data <-
+  data %>% 
+  mutate(
+    library_nn1 = nn_function(st_c(data),st_c(library.sf), 1),
+    library_nn2 = nn_function(st_c(data),st_c(library.sf), 2),
+    library_nn3 = nn_function(st_c(data),st_c(library.sf), 3),
+    library_nn4 = nn_function(st_c(data),st_c(library.sf), 4),
+    library_nn5 = nn_function(st_c(data),st_c(library.sf), 5),
+    )
+
+#5.Historical cemeteries:
+data <-
+  data %>% 
+  mutate(
+    hist_cemeteries_nn1 = nn_function(st_c(data),st_c(hist_cemeteries.sf), 1),
+    hist_cemeteries_nn2 = nn_function(st_c(data),st_c(hist_cemeteries.sf), 2),
+    hist_cemeteries_nn3 = nn_function(st_c(data),st_c(hist_cemeteries.sf), 3),
+    hist_cemeteries_nn4 = nn_function(st_c(data),st_c(hist_cemeteries.sf), 4),
+    hist_cemeteries_nn5 = nn_function(st_c(data),st_c(hist_cemeteries.sf), 5),
+    )
+
+#6.Historical Properties:
+data <-
+  data %>% 
+  mutate(
+    hist_properties_nn1 = nn_function(st_c(data),st_c(hist_properties.sf), 1),
+    hist_properties_nn2 = nn_function(st_c(data),st_c(hist_properties.sf), 2),
+    hist_properties_nn3 = nn_function(st_c(data),st_c(hist_properties.sf), 3),
+    hist_properties_nn4 = nn_function(st_c(data),st_c(hist_properties.sf), 4),
+    hist_properties_nn5 = nn_function(st_c(data),st_c(hist_properties.sf), 5),
+    )
+
+#7.church
+data <-
+  data %>% 
+  mutate(
+    church_nn1 = nn_function(st_c(data),st_c(church.sf), 1),
+    church_nn2 = nn_function(st_c(data),st_c(church.sf), 2),
+    church_nn3 = nn_function(st_c(data),st_c(church.sf), 3),
+    church_nn4 = nn_function(st_c(data),st_c(church.sf), 4),
+    church_nn5 = nn_function(st_c(data),st_c(church.sf), 5),
+    )
+
+#9.park easement:
+data <-
+  data %>% 
+  mutate(
+    park_location_nn1 = nn_function(st_c(data),st_c(park_location.sf), 1),
+    park_location_nn2 = nn_function(st_c(data),st_c(park_location.sf), 2),
+    park_location_nn3 = nn_function(st_c(data),st_c(park_location.sf), 3),
+    park_location_nn4 = nn_function(st_c(data),st_c(park_location.sf), 4),
+    park_location_nn5 = nn_function(st_c(data),st_c(park_location.sf), 5),
+    )
+
+#10.Capital Improvement Projects:
+data <-
+  data %>% 
+  mutate(
+    capital_improve_nn1 = nn_function(st_c(data),st_c(capital_improve.sf), 1),
+    capital_improve_nn2 = nn_function(st_c(data),st_c(capital_improve.sf), 2),
+    capital_improve_nn3 = nn_function(st_c(data),st_c(capital_improve.sf), 3),
+    capital_improve_nn4 = nn_function(st_c(data),st_c(capital_improve.sf), 4),
+    capital_improve_nn5 = nn_function(st_c(data),st_c(capital_improve.sf), 5),
+    )
+```
+
+### 2.1.3 Split dataset & price tier classification
+
+Through the histogram comparison we can see that the distribution of housing prices is very uneven and needs to be removed outliers according to certain criteria.
+
+```{r model_set, message=FALSE, warning=FALSE, echo=TRUE, error=FALSE, fig.height=5}
+#challenge_set:
+challenge_set<-data %>% filter(price==0)
+#model_set:
+model_set<-data %>% filter(price!=0)
+
+plot1<- ggplot(model_set)+
+  geom_histogram(aes(price), position = "dodge",stat = "bin",color = "white",fill= "orange") +  
+  labs(title = "Distribution of prices\n(modelsetwith outlier)\n",caption = 'Figure DATA 2.1.1')+ 
+  scale_color_grey() + theme_classic()
+
+# define outliers
+Q1 = quantile(model_set$price)[2]
+Q3 = quantile(model_set$price)[4]
+lowerouter <- Q1 - 3*(Q3-Q1)
+upperouter <- Q3 + 3*(Q3-Q1)
+
+model_set<-data %>% filter(price!=0 & price < upperouter)
+plot2 <- ggplot(model_set)+
+  geom_histogram(aes(price), position = "dodge",stat = "bin",color = "white",fill= "orange") +  
+  labs(title = "Distribution of prices\n(modelsetwithout outlier)\n",caption = 'Figure DATA 2.1.2')+ theme_classic()
+
+grid.arrange(plot1, plot2, ncol=2)
+```
+
+## 2.2 Summary Statistics of Features
+
+As required, we provided three tables of summary statistics with variable descriptions for sorting features based on their categories below. For better visualization and analysis, features were divided according to their sources and catergories.
+
+Based on the [**hedonic home price model**](https://www.researchgate.net/publication/286450750_Hedonic_Price_Analysis), features are put into three categories:
+
+* **Internal Features**, features related to the quality of house, like the number of bathrooms;
+
+* **Amenities Features**, like hospital accessibility;
+
+* **Tract Features**, features related to the spatial characteristics, like census tracts data
+
+In total, we took **99** features into consideration in the initial stage. Detailed summary statistics are provided below.
+
+### 2.2.1 Internal Features
+
+The table and plots show that the difference between houses is very large, especially in terms of **price, area, and age.** Also out of instinct, we might consider `fullbaths`&`halfbaths` `units`&`bedrooms`, `shape_area`&`heated area` might correlate with each other.
+
+```{r summary_internal_features,results = 'asis'}
+#Summary and selection of internal features:
+internal.variable <- c("price",
+                "shape_Area",
+                "pricepersq",
+                "AGE",
+                "heatedarea",
+                "numfirepla",
+                "fullbaths",
+                "halfbaths",
+                "bedrooms",
+                "units")
+
+internal.features<-model_set[internal.variable] %>%
+  st_drop_geometry()
+#stargazer:
+stargazer(internal.features, type = "html", 
+          title = "Table DATA 2.2 Summary Statistics of Internal Characteristics\n(numeric features)\n ",
+          header = FALSE,
+          single.row = TRUE)
+```
+
+
+
+We can see that **AGE** do not have correlation with the dependent variable, which we will consider to remove in the future. Also we can notice that **heatedarea** has a strong positive influence for price. In addition the relationship of this variable with other variables is very similar to their relationship with price, which suggests that it may be an important indicator in the future that can represent these variables to predict prices. Also we check the relationship between `fullbaths`&`halfbaths` `units`&`bedrooms`, `shape_area`&`heated area`. Surprisingly, `fullbaths` and `halfbaths` do not have relation with each other. `Bedrooms` and `units` have negative correlation. This suggests that perhaps the distribution of data in this dataset is not what we would expect by common sense.
+
+```{r internal_feature_correlation_matrix,  message=FALSE, warning=FALSE, echo=TRUE}
+#Correlation matrix of internal features:
+numericVars <- 
+  select_if(internal.features, is.numeric) %>% na.omit()
+#['#d73027','#fc8d59','#fee090','#ffffbf','#e0f3f8','#91bfdb','#4575b4']
+ggcorrplot(
+  round(cor(numericVars), 1), 
+  p.mat = cor_pmat(numericVars),
+  colors = c('#4575b4', "#ffffff",'#fecc5c'),
+  type="upper",
+  insig = "pch") +  
+  labs(title = "Correlation across numeric variables\n(internal features)\n", caption = 'Figure DATA 2.2.1') +
+  plotTheme()
+
+sel.internal.list <-  c("price",
+                "shape_Area",
+                "heatedarea",
+                "numfirepla",
+                "fullbaths",
+                "halfbaths",
+                "bedrooms",
+                "units")
+```
+
+
+### 2.2.2 Amenities Features
+
+From the results of the correlation, different amenities features have different values of nn related to price. Park does not have much impact on the overall results and will be removed in the next step of the analysis. capital improvement related variables are meaningful only when n=2. Similarly, college features are related when nn=2. Medical facilities are more meaningful when n\>2.
+
+```{r results = 'asis', message=FALSE, warning=FALSE, echo=TRUE}
+
+amenities_feature.list<-model_set %>% dplyr::select(
+  starts_with('college_'),
+  starts_with('daycare_'),
+  starts_with('MedicalFacilities_'),
+  starts_with('library_'),
+  starts_with('hist_'),
+  starts_with('church'),
+  starts_with('park_'),
+  starts_with('capital_'),
+  price) %>% 
+  st_drop_geometry()
+#stargazer:
+stargazer(amenities_feature.list, type = "html", 
+          title = "Table DATA 2.1 Summary Statistics of Internal Characteristics ",
+          out.header = TRUE,
+          single.row = TRUE,out="amenities_feature.htm")
+```
+
+```{r ammenity feature correlation}
+ggcorrplot(
+  round(cor(amenities_feature.list), 1), 
+  p.mat = cor_pmat(amenities_feature.list),
+  colors = c('#4575b4', "#ffffff",'#fecc5c'),
+  type="upper",
+  insig = "pch") +  
+  labs(title = "Correlation across numeric variables\n(amenity features)\n",
+       caption = 'Figure DATA 2.2.2')+plotTheme()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size=7),
+        axis.text.y = element_text(size=7))
+#Amenities
+sel.amenitie<-model_set%>% dplyr::select(
+  starts_with('college_'),
+  starts_with('daycare_'),
+  starts_with('MedicalFacilities_'),
+  starts_with('library_'),
+  starts_with('hist_'),
+  starts_with('church'),
+  starts_with('capital_'),
+  price) %>% 
+  st_drop_geometry()
+```
+
+### 2.2.3 Tract Features
+
+From the result of correlation, Most tract features are price-dependent. `pctTotalVacant` has nothing to do with price and can be deleted. `pctBachelor`,`test.high`, `test.middle`, `test.elementary` are correlated can keep one, `MedAge`, `MedHHInc`, `MedRent` highly relevant, can keep one.
+
+```{r amenities_feature_matrix}
+#Tract Feature
+tract.list <- c("pctTotalVacant", "pctRenterOccupied", "pctWhite","pctPoverty","MedRent" ,"MedHHInc","MedAge","crime_sum", "PctLongCommute", "Pctgrocery", "test.elementary","test.middle", "test.high","PctBachelor",'price')
+
+tract_feature.list<-model_set[tract.list]%>% 
+  st_drop_geometry()
+
+numeric.tract<- 
+  select_if(tract_feature.list, is.numeric) %>% na.omit()
+
+ggcorrplot(
+  round(cor(numeric.tract), 1), 
+  p.mat = cor_pmat(numeric.tract),
+  colors = c('#4575b4', "#ffffff",'#fecc5c'),
+  type="upper",
+  insig = "pch") +  
+  labs(title = "Correlation across numeric variables\n public service features\n",
+       caption = 'Figure DATA 2.2.3')+plotTheme()+
+  theme(axis.title.x = element_text(size=3),axis.title.y = element_text(size=3))
+
+
+sel.tract.list<- c( "pctRenterOccupied", "pctWhite","pctPoverty","MedRent" ,"MedHHInc","MedAge","crime_sum", "PctLongCommute", "Pctgrocery",  "test.elementary","PctBachelor",'price')
+```
+
+### 2.2.4 Nonnumeric Features
+
+From the histograms we can see that most of the indicators are correlated with prices, and that different indicators affect different ranges of prices: - bldggrade(building grade) and extwall related to the high price as well as the price of the low price range. - aheatingty and storyheigh relate to the central and high price range - heatedfuel relates to the central price range
+
+Based on their distribution in different price ranges, we reclassify the nonnumeric feature to facilitate better training learning.
+
+```{r feature_enginneering_nonnumeric}
+numeric<- select_if(data, is.numeric)%>% na.omit()%>% 
+  st_drop_geometry()
+nonnumeric <- select_if(data, !(colnames(data)%in% colnames(numeric)))
+# 1.Modify extwall:
+extwall.stone<-c("STONE")
+data <- 
+  data %>%
+  mutate(extwall.m = ifelse(extwall %in% extwall.stone,"STONE","Non-STONE"))
+
+# 2.Modify Aheatingty:
+hotwater<-c("HOT WATER")
+data<-data %>% mutate(aheatingty.m = ifelse(aheatingty %in% hotwater,"HOT WATER","ELSE" ))
+
+# 3.Modify heatedfuel:
+gas<-c("GAS")
+data<-data %>% mutate(heatedfuel.m = ifelse(heatedfuel %in% gas,"GAS","ELSE" ))
+
+# 4.Modify bldggrade
+fairplus<-c("FAIR","MINIMUM","NA")
+data<-data %>% mutate(bldggrade.m = ifelse(bldggrade %in% fairplus,"ELSE",bldggrade))
+
+# 5.Modify storyheigh
+storyelse<-c("NA","SPLIT LEVEL","BI-LEVEL","CAPE COD","RANCH W/BSMT")
+data<-data %>% mutate(storyheigh.m = ifelse(storyheigh %in% storyelse,"ELSE",storyheigh ))
+
+#非数字的列
+nonnumeric.feature1 <- c("descbuildi", "storyheigh.m", "aheatingty.m", "heatedfuel.m", "extwall.m", "foundation", "bldggrade.m","isin","price")
+```
+
+```{r histogram_train_feature, message=FALSE, warning=FALSE, echo=TRUE, error=FALSE, fig.height=6}
+model_set %>% 
+  st_drop_geometry() %>% 
+  dplyr::select(price,extwall,storyheigh,heatedfuel,aheatingty,bldggrade) %>%
+  filter(price <= upperouter) %>%
+  gather(Variable, Value, -price) %>% 
+  ggplot(aes(Value, price)) +
+  geom_bar(position = "dodge", stat = "summary", fun = mean, fill= '#abd9e9') +
+  facet_wrap(~Variable, ncol = 3, scales = "free") +
+  labs(title = "Price as a function of\nnonnumeric variables", y = "Mean_Price",
+       caption = 'Figure DATA 2.3') +plotTheme()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size=6),  strip.background = element_rect(fill = "white"),panel.grid.minor =element_blank() ,panel.grid.major =element_blank())
+```
+
+## 2.3 Home Price Correlation Scatterplots
+
+In this section, we specifically explored the correlation between sale price and four interesting and meaningful features: Heated Area, Crime Summary, Distance to capital improvement Projects, Distance to libraries.
+
+Through graphs below, it is obvious that the first two of four features have strong correlation with sale price, while for the distance to amenities, there is no particularly strong correlation with price. But in general distance and price are inversely correlated, which is consistent with our intuition. Meanwhile, by comparing the scatter plot and correlation of capital improvement and library, we can see that there is a specific distance boundary for capital improvement, while the distance to library has no specific boundary although it is related to price.
+
+```{r scatter_plot1&2,  message=FALSE, warning=FALSE, echo=TRUE, error=FALSE, fig.height=5}
+# DATA - 4 Scatter plot  
+## 1. Two House Internal characteristics
+features <- c('Heated Area', 'Crime Summary')
+names(features) <- c("heatedarea", "crime_sum")
+price.house.plot <- 
+  st_drop_geometry(model_set) %>% 
+  dplyr::select(price, heatedarea, crime_sum) %>%
+  filter(price <= upperouter) %>%
+  gather(Variable, Value, -price) %>% 
+  ggplot(aes(Value, price)) +
+  geom_point(size = .5, colour='#abd9e9',alpha=0.5) + 
+  geom_smooth(method = "lm", se=F, colour = 'orange') +
+  facet_wrap(~Variable, ncol = 2, scales = "free",
+             labeller = labeller(Variable = features)) +
+  plotTheme() + 
+  labs(title = "Price as a Function of House Internal Characteristics Variables:\nCrime Summary, Heated Area\n",
+       caption = 'Figure DATA 2.4.1') 
+
+price.house.plot
+```
+
+```{r scatter_plot3, message=FALSE, warning=FALSE, echo=TRUE, error=FALSE, fig.height=5}
+## 2. Average Distance of Nearest 2 capital improvement projects 
+price.capital_improve_nn2.plot <-
+  st_drop_geometry(model_set) %>% 
+  dplyr::select(price, capital_improve_nn2) %>%
+  filter(price <= upperouter) %>%
+  gather(Variable, Value, -price) %>% 
+  ggplot(aes(Value, price)) +
+  geom_point(size = .5,colour='#abd9e9',alpha=0.5) + 
+  geom_smooth(method = "lm", se=F, colour = 'orange') +
+  labs(title = "Price as a Function of Average Distance of\nNearest Two Capital Improvement Projects\n",subtitle="Mecklenburg, NC",
+       caption = 'Figure DATA 2.4.2') +
+  plotTheme()
+
+price.capital_improve_nn2.plot
+```
+
+```{r scatter_plot4,  message=FALSE, warning=FALSE, echo=TRUE, error=FALSE, fig.height=5}
+## 3. Average Distance of Nearest 4 libraries 
+price.library_nn4.plot <-
+  st_drop_geometry(model_set) %>% 
+  dplyr::select(price, library_nn4) %>%
+  filter(price <= upperouter) %>%
+  gather(Variable, Value, -price) %>% 
+  ggplot(aes(Value, price)) +
+  geom_point(size = .5, colour='#abd9e9',alpha=0.5) + 
+  geom_smooth(method = "lm", se=F, colour = 'orange') +
+  labs(title = "Price as a Function of Average Distance of\nNearest Four Libraries\n",subtitle="Mecklenburg, NC",
+       caption = 'Figure DATA 2.4.3') +
+  plotTheme()
+
+price.library_nn4.plot
+```
+
+## 2.5 Map Home Price
+
+The sale price per SqFt in Mecklenberg shows a clear spatial pattern. The sale price in Belk, Lofton, Harris is significantly higher than other areas.
+
+```{r plot_home_price}
+#Plot of home price per square feet:
+ggplot()+
+  geom_sf(data=st_union(tract),fill="white", color = "grey")+
+  geom_sf(data=model_set,aes(color=q5(pricepersq)),show.legend="point",size=.75)+
+  scale_color_manual(values = palette2,labels = qBr(model_set, "pricepersq"),name = "House Price\nPer Square Feet\n(Quintile Breaks)")+
+  labs(title="House Price",subtitle = "Mecklenberg County,NC",caption="Figure2.5")+
+  mapTheme()
+```
+
+## 2.6 Maps of Independent Variables
+
+After having a preliminary idea of the correlation between variables and the distribution of house prices, we would like to map the correlation with the age of the house, which is not particularly correlated with house prices, to see if the age of the house is completely irrelevant to the overall price distribution.The map results are unexpected, although in some parts of age and the distribution of housing prices are not related, but for some areas, the areas with high housing age but higher prices, but this may be due to these areas are located in the old city, housing construction time but other resources in the district is more excellent.
+
+
+```{r distribution_AGE, echo=TRUE, message=FALSE, warning=FALSE}
+ggplot()+
+  geom_sf(data=model_set,aes(color=q5(AGE)),alpha= 0.5,show.legend = "point",size=.75)+
+  geom_sf(data=st_union(tract),fill= "transparent", color = "grey")+
+  scale_color_manual(values = palette2,labels = qBr(model_set, "AGE"),name = "Quintile Breaks\n(Year)")+
+  labs(title="Distribution of the House Age",subtitle = "Based on Each Home Sale Observation\nMecklenburg, NC",caption="Figure2.6.1")+mapTheme()
+```
+
+According to the results of correlation we know that the accessibility of daycare facilities, testscore and price are positively correlated, but it is not clear how much overlap they have in geographic distribution, here we would like to compare and observe.
+
+
+```{r distribution_daycare, echo=TRUE, message=FALSE, warning=FALSE}
+
+pcttest1.plot <- ggplot()+
+  geom_sf(data=st_union(tract),fill="white", color = "grey")+
+  geom_sf(data=model_set,aes(color=q5(test.elementary)),show.legend = "point",size=.75)+
+  scale_color_manual(values = c('#eff3ff','#bdd7e7','#6baed6','#3182bd','#08519c'),labels = qBr(model_set, "test.elementary"),name = "Quintile Breaks\n(Percent)")+mapTheme()+
+  labs(title="Test Proficiency - Elementary School",subtitle = "Percentage of Charlotte-Mecklenburg Schools (CMS) students \nin grades 3-5 proficient in End of Grade testing",caption="Figure2.6.2")
+
+daycare_nn4 <- model_set %>%
+  mutate(daycare_nn4.expanded = daycare_nn4 * 1000)
+
+daycare.plot <- ggplot() + 
+  geom_sf(data = st_union(tract),fill ="white", color = "grey") +
+  geom_sf(data = daycare_nn4,aes(color = q5(daycare_nn4.expanded)),size = .75) +
+  scale_color_manual(values = palette2,
+                     labels = qBr(daycare_nn4,'daycare_nn4.expanded'),name = "Quintile Breaks\n(Percent)") +  mapTheme() +
+  labs(title = 'Average Distrance to Nearest 4 Daycare Center',
+       subtitle =  "Average Distrance to Nearest Daycare\n(timed by 1000 for better visualization)",
+       caption = 'Figure2.6.3') 
+
+grid.arrange(pcttest1.plot, daycare.plot, ncol=2)
+
+```
+
+## 2.7 Detection of NA values
+
+To further understand the data set to reduce the error, we counted the NA values of each variable and selected as few as possible with NA values.
+
+
+```{r spatial lag}
+
+coords <- st_coordinates(data) 
+neighborList <- knn2nb(knearneigh(coords, 5))
+
+spatialWeights <- nb2listw(neighborList, style="W")
+
+data$lagPrice <- lag.listw(spatialWeights, data$price)
+```
+
+
+
+```{r challenge_set, fig.align='center', message=FALSE, warning=FALSE, echo=TRUE, error=FALSE, fig.height=5}
+#challenge_set
+challenge_set<-data %>% filter(price==0)
+#model_set
+model_set<-data %>% filter(price!=0)
+# na
+na <- colSums(is.na(model_set))
+na.100 <-as.data.frame(subset(na, na>100))
+na.100<-tibble::rownames_to_column(na.100, "col_names")
+
+ggplot(na.100) +
+  geom_col(aes(x=col_names, y=subset(na, na>100)),fill = '#fecc5c',color="white") +
+  labs(title="NA counts in DataFrame",
+       subtitle = "Na > 100\n",
+       caption = "Figure DATA 2.7") +
+  xlab('Variable Column Names') +
+  ylab('Count') + plotTheme()+theme(axis.text.x = element_text(angle = 45, hjust = 1, size=8))
+```
+
+
+
+# III.Methods
+
+The primary goal of this analysis is to train a robust model to predict house price as accurately as possible. Accordingly, this section started to provide a detailed interpretation on the process of the model building.
+
+-   **Data and Sample:**In order to accurately build and test models, we randomly split the whole `model_set` into two parts: `model_set.train` with 77% of observations for model training and `model_set.test` with 23% of observations for model testing.
+
+-   **Dependent Variable:** The dependent variable is home sale price: `price`.
+
+-   **Independent Variables:** Based on the [**hedonic home price model**](https://www.researchgate.net/publication/286450750_Hedonic_Price_Analysis), features are put into three catogories. After creating features and engineering and checking correlation coefficients, 88 features are eligible for the model and obviously or slightly correlated with `price` that were the initial independent variables for model building. We gradually screened out variables and eventually selected only **26** robust features included in the final model
+
+-   **Outliers:** For the determination of outlier we refer to [**zillow's price tier classification**](https://www.zillow.com/research/zhvi-methodology-2019-deep-26226/): The ZHVI generally applies to three market tiers - bottom, middle and top - roughly equivalent to one-third of each market. The mid-tier ZHVI includes all homes between 35% and 65% of the value of the home. This mid-market range is closest to the standard definition of a "typical" home in a region, and because of the geographic distribution of this challenge we primarily considered a model with a price range in the middle of the market for training purposes.
+
+-   **Procedure:** The primitive approach used in this analysis for model building is **Ordinary Least Squares Regression (OLS)** which is aimed at predicting the `price` of houses as a function of several statistical parameters such as *intercept*, *slope* and selected *features*. In order to determine which features were able to significantly increase the accuracy and generalizability of the model, we systematically compared, plotted, and mapping the **mean absolute errors (MAE)**, **mean absolute percent errors (MAPE)**, as well as **root mean square errors** (RMSE, the standard deviation of the residuals) between original `SalePrice` and predicted `price` of both training set and test set, conducted the cross-validation on 100 folds, explored the underlying spatial pattern of price and errors caused by problematic prediction. To address the problem of neglecting the underlying spatial correlation caused by neighborhood, we then compared, plotted, and mapped the mean absolute errors (MAE), and mean absolute percent errors (MAPE) on the test set between baseline model without neighborhood features and updated model with **neighborhood features**, and then determined our final model based on series model examinations.
+
+# IV.Result
+
+## 4.1 Dataset Splitting and Model Building
+
+Initially, as indicated in the [III. Methods](#anchor), the dataset was divided into training set and test set, with the ratio of 6:4. Here we use `paste()`command to make sure to include all levels of our specified variables in the training set, therefore, in the end, the raio of training set and test set goes up to 77:23.
+
+
+
+```{r model_set_split,warning=FALSE}
+#1.Split Model Set:
+set.seed(7278)
+
+# get index for training sample:
+inTrain<-caret::createDataPartition(
+  y = paste(model_set$descbuildi,model_set$storyheigh,
+            model_set$extwall,model_set$bldggrade,
+            model_set$price),
+  p = .60, 
+  list=FALSE)
+
+#Find the number of outliers:
+Q1<-quantile(model_set$price)[2]
+Q3<-quantile(model_set$price)[4]
+
+number_out = Q3+3*(Q3-Q1)
+
+# split model_set into train and test
+model_set.train0<-model_set[inTrain,]
+model_set.train<-model_set[inTrain,] %>% 
+                  filter(price<=number_out)
+model_set.test<-model_set[-inTrain,]
+
+outlier<-model_set[inTrain,] %>% 
+                  filter(price>Q3+3*(Q3-Q1))
+
+# Feature Collection
+##Non-numeric Features
+nonnumeric <- model_set.train %>% 
+  dplyr::select(all_of(nonnumeric.feature1))%>% 
+  st_drop_geometry()
+
+##Internal Features
+sel.internal<-model_set.train %>% 
+  dplyr::select(all_of(sel.internal.list)) %>% 
+  st_drop_geometry()
+
+##Tract Features
+sel.tract<-model_set.train %>% 
+  dplyr::select(all_of(sel.tract.list)) %>% 
+  st_drop_geometry()
+
+##AmenitY Features
+sel.amenitie1<-model_set.train%>% 
+  dplyr::select(
+  starts_with('college_'),
+  starts_with('daycare_'),
+  starts_with('MedicalFacilities_'),
+  starts_with('library_'),
+  starts_with('hist_'),
+  starts_with('church'),
+  starts_with('capital_'),
+  starts_with('park_l'),
+  price) %>% 
+  st_drop_geometry()
+```
+
+Secondly, we built three models with different features to examine which features should be included.
+
+* Model 0 included all the features we were interested in.
+* Model 1 excluded some of features which were not significantly correlated with `price` in Model 1. 
+* Model 2 continued to exclude some of features which were not significantly correlated with SalePrice in Model 2 or have strong correlation with other features (considering multicollinearity), but still remained the ones with comparatively large correlation coefficients.  Model 2 was the **baseline model** in this analysis.
+
+The baseline model contained the following features.
+
+* **1** non-numeric feature: `bldggrade.m`; 
+* **5** internal characteristic features: `shape_Area`,`heatedarea`,`fullbaths`,`bedrooms`, `units`;
+* **10** tract features: `pctRenterOccupied`,`pctWhite`,`MedHHInc`,`test.elementary`,`crime_sum`,`PctLongCommute`,`Pctgrocery`,`isin`;
+* **4** amenity features: `college_nn5`,``library_nn2`,`hist_properties_nn5`,
+`capital_improve_nn2`.
+
+Model summaries were all shown below. 
+
+```{r all_features,results = 'asis'}
+train_set.all<-model_set.train %>% dplyr::select(price,
+  all_of(nonnumeric.feature1),all_of(sel.internal.list),all_of(sel.tract.list),
+  starts_with('college_'),
+  starts_with('daycare_'),
+  starts_with('MedicalFacilities_'),
+  starts_with('library_'),
+  starts_with('hist_'),
+  starts_with('church'),
+  starts_with('capital_'),
+  starts_with('park_l')
+) %>% st_drop_geometry()
+
+M0 <- lm(price ~ ., data = train_set.all)
+
+stargazer(M0, type = "html", 
+          title = "Table 4.1.1 Summary Statistics of Model.1 ",
+          header = FALSE,
+          single.row = TRUE)
+```
+
+```{r results = 'asis'}
+train_set.1<-model_set.train %>% dplyr::select(
+  price,
+  #Non-numeric Feature
+  bldggrade.m,
+  #Internal Feature
+  shape_Area ,heatedarea,fullbaths,bedrooms, units,
+  #Tract Feature
+  pctRenterOccupied , pctWhite ,pctPoverty,MedHHInc,
+  test.elementary,crime_sum,PctLongCommute,Pctgrocery,MedAge,isin,
+  #Amenities Feature
+  college_nn4,college_nn5,library_nn3,library_nn4,
+  library_nn2,hist_properties_nn5,capital_improve_nn4,
+  capital_improve_nn5,park_location_nn2,
+  park_location_nn3) %>% st_drop_geometry()
+
+M1 <- lm(price ~ ., data = train_set.1)
+
+stargazer(M1, type = "html", 
+          title = "Table 4.1.2 Summary Statistics of Model.2 ",
+          header = FALSE,
+          single.row = TRUE)
+```
+
+```{r the_selected_model,results='asis',warning=FALSE,message=FALSE}
+train_set.2<-model_set.train %>%
+  dplyr::select(
+  price,
+  #Non-numeric Feature
+  bldggrade.m,
+  #Internal Feature
+  shape_Area ,heatedarea,fullbaths,bedrooms , units,
+  #Tract Feature
+  pctRenterOccupied , pctWhite,MedHHInc,test.elementary,crime_sum,PctLongCommute,Pctgrocery,isin,
+  #Amenities Feature
+  college_nn5,library_nn2,hist_properties_nn5,capital_improve_nn2
+ ) %>% st_drop_geometry()
+
+M2 <- lm(price ~ ., data = train_set.2)
+
+stargazer(M2, type = "html", 
+          title = "Table 4.1.3 Summary Statistics of Model.2 ",
+          header = FALSE,
+          single.row = TRUE)
+```
+
+## 4.2 Training Set Summary Results
+
+The results of the regression on the training set are in the following table. The current model embraced 18 independent features and reached 0.695 R-square, indicating that 69.5% of the variance for `price` can be explained by this model.
+
+```{r results='asis',warning=FALSE,message=FALSE}
+train_set.2<-model_set.train %>%
+  dplyr::select(
+  price,
+  #Non-numeric Feature
+  bldggrade.m,
+  #Internal Feature
+  shape_Area ,heatedarea,fullbaths,bedrooms , units,
+  #Tract Feature
+  pctRenterOccupied , pctWhite,MedHHInc,test.elementary,crime_sum,PctLongCommute,Pctgrocery,isin,lagPrice,
+  #Amenities Feature
+  college_nn5,library_nn2,hist_properties_nn5,capital_improve_nn2
+ ) %>% st_drop_geometry()
+
+M2 <- lm(price ~ ., data = train_set.2)
+
+stargazer(M2, type = "html", 
+          title = "Table 4.2.1 Summary Statistics of Model.2 ",
+          header = FALSE,
+          single.row = TRUE)
+```
+
+```{r Model_selected_Statistics,warning=FALSE,message=FALSE}
+broom::glance(M2) %>%
+  kable(caption = 'Table 4.2.2 Summary of Model.2 Evaluation Parameters') %>%
+  kable_styling("striped", full_width = F)
+```
+
+## 4.3 MAE, MAPE on Test Set
+
+The Mean Absolute Errors (MAE) and Mean Absolute Percent Errors (MAPE) are statistical measures of how accurate a forecast system is.Based on the following table, the MAE is 67903.84, the errors are accounted for 19.20%.
+
+```{r training_model,warning=FALSE,message=FALSE}
+training_model<-M2
+
+train_model_set.test<-model_set.test %>% 
+  mutate(Regression = "Baseline Regression",
+         price.Predict = predict(training_model, newdata = model_set.test),
+         price.Error = price - price.Predict,
+         price.AbsError = abs(price - price.Predict),
+         price.APE = (abs(price - price.Predict)) / price) 
+  
+#%>% filter(price<=1500000)
+
+test_GoodnessFit<-as.data.frame(cbind(mean(train_model_set.test$price.AbsError,na.rm = T),
+                                      mean(train_model_set.test$price.APE,na.rm = T)))
+
+colnames(test_GoodnessFit)<-c("Mean Absolute Errors (MAE)","MAPE")
+kable(test_GoodnessFit,
+      caption = 'Table 4.3.1. MAE and MAPE for Test Set') %>%
+  kable_styling("striped", full_width = F)
+```
+
+```{r test_plot, fig.align='center',warning=FALSE,message=FALSE}
+grid.arrange(ncol=2,
+ggplot()+
+  geom_sf(data=st_union(zipcode), fill="transparent", color='grey90')+
+  geom_sf(data=train_model_set.test,
+          aes(color=q5(price)),show.legend="point",size=1.0)+
+  scale_color_manual(values = palette2,labels = qBr(train_model_set.test, "price"),name = "Quintile Breaks")+
+  labs(title="Test set sale price",subtitle = "Mecklenberg County,NC",caption="Figure 4.3.1")+
+  mapTheme(),
+
+ggplot()+
+  geom_sf(data=st_union(zipcode), fill="transparent", color='grey90')+
+  geom_sf(data=train_model_set.test,
+          aes(color=q5(price.AbsError)),show.legend="point",size=1.0)+
+  scale_color_manual(values = palette2,labels = qBr(train_model_set.test, "price.AbsError"),name = "Quintile Breaks")+
+  labs(title="Test set absolute sale price errors",subtitle = "Mecklenberg County,NC",caption="Figure 4.3.2")+
+  mapTheme())
+```
+
+## 4.4 Cross-Validation
+
+This section conducted cross-validation to assess how our model would generalize to other independent data sets, in which we could flag problem of overfitting or feature selection bias. 
+
+Both a summary table and distribution plots of R-square, RMSE, and MAE in each of 100 fold are shown below.
+
+The variation of 100 folds can also be visualized with a histogram of across-fold MAE. Although most of the errors are clustering tightly together, some errors are scattered, indicating the inconsistency of the model prediction.
+
+```{r warning=FALSE,message=FALSE}
+# 4. Cross-Validation Test on traning model
+##use caret package cross-validation method
+fitControl <- caret:: trainControl(method = "cv", 
+                                   number = 100,
+                                   savePredictions = TRUE)
+
+set.seed(2777)
+
+model_set.train.cv <- 
+  caret::train(price ~ ., data = st_drop_geometry(train_model_set.test) %>% 
+                 dplyr::select(
+  price,
+  #Non-numeric Feature
+  bldggrade.m,
+  #Internal Feature
+  shape_Area ,heatedarea,fullbaths,bedrooms , units,
+  #Tract Feature
+  pctRenterOccupied , pctWhite ,MedHHInc ,test.elementary,crime_sum,PctLongCommute,Pctgrocery,isin,
+  #Amenities Feature
+  college_nn5,library_nn2,hist_properties_nn5,capital_improve_nn2
+                  ),
+                  method = "lm", 
+                  trControl = fitControl, 
+                  na.action = na.pass)
+
+#resample<-model_set.train.cv$resample
+
+## show RMSE, MAE, R^2
+kable(model_set.train.cv$resample,
+          caption = 'Table 4.4.1 Cross-validation Test: Summary of RMSE, R Squared and MAE') %>%
+  kable_styling("striped", full_width = F)
+```
+
+
+```{r fig.align='center', message=FALSE, warning=FALSE, echo=TRUE, error=FALSE, fig.height=5}
+model_set.train.cv$resample %>% 
+  pivot_longer(-Resample) %>% 
+  mutate(name = as.factor(name)) %>% 
+  ggplot(., aes(x = name, y = value, color = name)) +
+  geom_jitter(width = 0.1) +
+  facet_wrap(~name, ncol = 3, scales = "free") +
+  theme_bw() +
+  theme(legend.position = "none") +
+  labs(title = 'Cross-validation Test: Distribution of MAE, RMSE, R Squared\n',
+       caption = "Figure DATA 4.4.1") +
+  plotTheme()
+```
+
+```{r fig.align='center', message=FALSE, warning=FALSE, echo=TRUE, error=FALSE, fig.height=5}
+ggplot(data = model_set.train.cv$resample) +
+  geom_histogram(aes(x = model_set.train.cv$resample$MAE), fill = '#fecc5c',color="white",bins=30) +
+  labs(title="Distribution of Cross-validation MAE",
+       subtitle = "K = 100\n",
+       caption = "Figure DATA 4.4.2") +
+  xlab('MAE of Training Model') +
+  ylab('Count') + plotTheme()
+```
+
+## 4.5 Plot Predicted Prices
+
+The Figure 5.5.1 below shows the predicted prices as a function of observed price. This plot indicates that our model can predict price but not so perfectly since the regression line (shown in dark-blue) and the reference line (shown in dark-red) are not completely overlapped.
+
+```{r  fig.align='center',warning=FALSE,message=FALSE,fig.height=5}
+# 5. Plot predicted prices as a function of observed prices
+model_set.train0<-model_set[inTrain,] %>% filter(price<=3000000)
+preds.train <- data.frame(pred   = predict(training_model, model_set.train0),
+                          actual = model_set.train0$price,
+                          source = "Training Set")
+preds.test  <- data.frame(pred   = predict(training_model, train_model_set.test),
+                          actual = train_model_set.test$price,
+                          source = "Test Set")
+preds <- rbind(preds.train, preds.test)
+
+## Overall Plotting
+ggplot(preds.test, aes(x = actual, y = pred, color = source)) +
+  geom_point(color='#abd9e9') +
+  geom_smooth(method = "lm", color = "darkblue") +
+  geom_abline(color = "darkred") +
+  coord_equal() +
+  theme_bw() +
+  labs(title = "Predicted Prices as a\nFunction of Observed Prices",
+       subtitle = 'Blue line is model regression line\nwhile red line is reference line\n',
+       caption = 'Figure DATA 4.5.1',
+       x = "Observed Prices",
+       y = "Predicted Prices") +
+  theme(
+    legend.position = "none"
+  ) +
+  plotTheme()
+```
+
+```{r  fig.align='center',warning=FALSE,message=FALSE}
+vs.plot<- ggplot(preds, aes(x = actual, y = pred,color=source)) +
+  geom_point() +
+  geom_smooth(method = "lm", color = "darkblue") +
+  geom_abline(color = "darkred") +
+  coord_equal() +
+  theme_bw() +
+  facet_wrap(~source, ncol = 2) +
+  labs(title = "Predicted Prices as a Function of Observed Prices, by Sets",
+       subtitle = 'Blue line is model regression line while red line is reference line\n',
+       caption = 'Figure DATA 4.5.2',
+       x = "Observed Prices",
+       y = "Predicted Prices") +
+  scale_color_manual(values = c('#abd9e9', '#fecc5c'))+
+  theme(
+    legend.position = "none"
+  ) +
+  plotTheme()
+vs.plot + geom_vline(xintercept=3000000, color='orange') + 
+  annotate("text", x = 3300000, y = 2000000, label = "Traning set\n upperbound",size=3)
+```
+
+## 4.6 Map of Test Set Residuals
+
+In this section, we leveraged three different tools to examine if prediction errors display certain spatial patterns, and accordingly to determine whether we need to add more spatial features in the existing model. 
+
+  1. **Mapping residuals**: In the map of the residuals on the test set, we can see there is no clear pattern of the error directions.
+
+  2. **Plotting spatial lags**: A spatial lag is a variable that averages the neighboring values of a location. The spatial lag of error plot shows that as home price errors increase, the nearby home price errors slightly increase, indicating that our model errors are rarely spatially autocorrelated. 
+  
+  3. **Moran's I**: Another approach for measuring spatial autocorrelation is Moran's I. In this model Moran’s I is around 0.18, indicating a certain level of clustering on model errors. The frequency of all 999 randomly permuted I were plotted as a histogram with the Observed I indicated by the orange line (see Figure 4.6.3). That the observed I is higher than all of the 999 randomly generated I's provides visual confirmation of spatial autocorrelation despite being slight. This suggests that variation in price is likely related to the spatial process has been omitted from our current model. 
+
+Therefore, we thought it was worthy to include neighborhood features in the model for the further test.
+
+```{r  fig.align='center',warning=FALSE,message=FALSE}
+ggplot()+
+  geom_sf(data=st_union(tract),fill="white",color='grey90')+
+  geom_sf(data=train_model_set.test,aes(color=q5(price.Error)),show.legend = "point",size=1.2)+
+  scale_color_manual(values=palette5,labels = qBr(train_model_set.test,'price.Error'),
+                     name = "Residuals")+
+  labs(title = 'Map of residuals on test set\n',subtitle = "Mecklenburg County, NC",
+       caption = 'Figure 4.6.1') +
+  mapTheme()
+```
+
+```{r  fig.align='center',spatial_lag,warning=FALSE,message=FALSE}
+abs<-train_model_set.test %>% filter(is.na(price.AbsError)==F)
+coords.test<-st_coordinates(abs)
+neighborList.test <- knn2nb(knearneigh(coords.test, 5))
+
+spatialWeights.test <- nb2listw(neighborList.test, style="W")
+
+abs$lagPrice.Error <- lag.listw(spatialWeights.test, abs$price.Error,NAOK = TRUE)
+
+ggplot(abs, aes(x = lagPrice.Error, y = price.Error)) +
+  geom_point(colour = '#abd9e9') +
+  geom_smooth(method = "lm", se = FALSE, colour ='orange') +
+  labs(title = "Error on Test Set as a function of the Spatial Lag of Price\n",
+       caption = "Figure 4.6.2",
+       x = "Spatial lag of errors (Mean error of 5 nearest neighbors)",
+       y = "Errors of Sale Price") +
+  plotTheme()
+```
+
+```{r  fig.align='center',moran_index, message=FALSE, warning=FALSE, echo=TRUE, error=FALSE, fig.height=5}
+
+moranTest <- moran.mc(abs$price.AbsError, 
+                      spatialWeights.test, nsim = 999)
+
+moran.plot <- ggplot(as.data.frame(moranTest$res[c(1:999)]), aes(moranTest$res[c(1:999)])) +
+  geom_histogram(binwidth = 0.01) +
+  geom_vline(aes(xintercept = moranTest$statistic), colour = "orange",size=1) +
+  scale_x_continuous(limits = c(-1, 1)) +
+  labs(title="Observed and permuted Moran's I",
+       subtitle= "Observed Moran's I in orange, I = 0.18",
+       x="Moran's I",
+       y="Count",
+       caption="Figure4.6.3") +
+  plotTheme()
+
+moran.plot
+```
+
+## 4.7 Neighborhood Effects Model
+
+Existing findings have indicated that neighborhood could also be a potential feature for model building. Hence, this section built a new model called **Neighborhood Effects** model based on the baseline model by adding neighborhood feature `zip`.
+
+```{r Nhood_Model,results='asis',warning=FALSE,message=FALSE, fig.align='center'}
+train_set.3<-model_set.train %>% filter(price<=1100000) %>% 
+  dplyr::select(
+  price,
+  #Non-numeric Feature
+  bldggrade.m,
+  #Internal Feature
+  shape_Area ,heatedarea,fullbaths,bedrooms , units,
+  #Tract Feature
+  pctRenterOccupied , pctWhite ,MedHHInc ,test.elementary,crime_sum,PctLongCommute,Pctgrocery,zip,isin,
+  #Amenities Feature
+  college_nn5,library_nn2,hist_properties_nn5,capital_improve_nn2) %>% st_drop_geometry()
+
+Nhood <- lm(price ~ ., data = train_set.3)
+
+stargazer(Nhood, type = "html", 
+          title = "Table 4.7.1 Summary Statistics of Neighborhood Effects Model ",
+          header = FALSE,
+          single.row = TRUE)
+```
+
+The Mean Absolute Errors (MAE) and Mean Absolute Percent Errors (MAPE) are statistical measures of how accurate a forecast system is.Based on the following table, the MAE is 65032.58, the errors are accounted for 18.24%. The **Neighborhood Effects** Model is slightly better than the **Baseline Regression** Model.
+
+```{r}
+Nhood_model.test<-model_set.test %>% 
+  mutate(Regression = "Neighborhood Effects",
+         price.Predict = predict(Nhood, newdata = model_set.test),
+         price.Error = price - price.Predict,
+         price.AbsError = abs(price - price.Predict),
+         price.APE = (abs(price - price.Predict)) / price) 
+#%>% filter(price<=1500000)
+
+test_GoodnessFit2<-as.data.frame(cbind(mean(Nhood_model.test$price.AbsError,na.rm = T),
+                                      mean(Nhood_model.test$price.APE,na.rm = T)))
+
+colnames(test_GoodnessFit2)<-c("Mean Absolute Errors (MAE)","MAPE")
+kable(test_GoodnessFit2,
+      caption = 'Table 4.7.2 MAE and MAPE for Neighborhood Effects') %>%
+  kable_styling("striped", full_width = F)
+```
+
+
+## 4.8 Map of Predicted Prices on the Whole Dataset
+
+Applying the new **Neighborhood Effects** model on the whole dataset, the distribution of sales price is shown in the map below. Sale prices are generally higher in south and north Mecklenburg County. There is no significant difference between the pattern of the distribution of price predictions in the two datasets (`CHALLENGE` & `MODELLING`). 
+
+```{r fig.align='center',predicted_price_whole,warning=FALSE,message=FALSE}
+# $392500: Median house value in Charlotte, NC, 2022 August.
+data$Predicted.Price<- predict(Nhood, newdata = data)
+data1<-data %>% mutate(Predicted.Price=ifelse(is.na(Predicted.Price),392500,Predicted.Price))
+
+ggplot() + 
+  geom_sf(data = st_union(tract),fill = 'white', color='gray90')+
+  geom_sf(data = data1,aes(color = q5(Predicted.Price)),size = .75) +
+  scale_color_manual(values = palette5,
+                     labels = qBr(data,'Predicted.Price'),
+                     name = "Price") +
+  facet_wrap(~toPredict) +
+  labs(title = 'Map of Predicted Sale Price\n',
+       subtitle = 'Mecklenburg, NC',
+       caption = 'Figure 4.8') +
+  mapTheme() 
+```
+
+## 4.9 Map of MAPE by Neighborhood
+
+Indicated in the summary table as well as the choropleth map below, MAPE varies across neighborhoods (only 31 neighborhoods left in the test set). 
+
+```{r warning=FALSE,message=FALSE}
+nhood_sum <- Nhood_model.test %>% 
+  group_by(zip) %>%
+  summarize(meanPrice = mean(price, na.rm = T),
+            meanPrediction = mean(price.Predict, na.rm = T),
+            meanMAE = mean(price.AbsError, na.rm = T),
+            meanMAPE = mean(price.APE, na.rm = T)) 
+
+nhood_sum %>%
+  st_drop_geometry ()%>%
+  arrange(desc(meanMAPE)) %>% 
+  kable(caption = 'Table 4.9.1 Map of MAPE by Neighborhood') %>% 
+  kable_styling("striped", full_width = F)
+```
+
+The following Figure 4.9.2 shows the difference between the **Baseline Regression** model and **Neighborhood Effects** model on the mean MAPE on the test set by neighborhood, and we can see that the latter model performs better. Besides, in the test set, both model exhibited larger MAPE in Downtown Charlotte.
+
+```{r fig.align='center',warning=FALSE,message=FALSE}
+pal<-colorRampPalette(c("#fff7fb","#ece2f0","#d0d1e6","#a6bddb","#67a9cf","#3690c0","#02818a","#016c59","#014636"))
+pal_1<-pal(90)
+
+bothRegression<-bothRegression<-rbind(train_model_set.test,Nhood_model.test)
+
+st_drop_geometry(bothRegression) %>%
+  group_by(Regression, zip) %>%
+  summarize(mean.MAPE = mean(price.APE, na.rm = T)) %>%
+  ungroup() %>% 
+  left_join(zipcode) %>%
+    st_sf() %>%
+    ggplot() + 
+      geom_sf(aes(fill = mean.MAPE),color="white") +
+      facet_wrap(~Regression) +
+      scale_fill_gradientn(colors=palette2,
+                          name = "MAPE") +
+      labs(title = "Mean test set MAPE by neighborhood",subtitle = "Mean test set MAPE by neighborhood",caption = "Figure 4.9.1") +mapTheme()
+```
+
+## 4.10 Plot MAPE by Neighborhood
+
+This section plotted MAPE by neighborhood as a function of mean price by neighborhood. Neighborhoods with mean sale price below or above 250,000 have higher MAPE, it has the lowest MAPE around 250,000. This finding indicates that most errors occurred in the neighborhoods where house price was relatively lower or relatively higher. 
+
+```{r MAPE_Neighborhood,fig.align='center',warning=FALSE,message=FALSE}
+ggplot()+
+  geom_point(data=nhood_sum,aes(x=meanPrice,y=meanMAPE), color='#abd9e9')+
+  stat_smooth(data=nhood_sum,aes(x = meanPrice, y = meanMAPE), method = "loess", se = FALSE, size = 1, colour="orange") + 
+  labs(title = "MAPE by Neighborhood as a Function of\nMean Price by Neighborhood\n",
+       caption = 'Figure DATA 4.10') +
+  xlab('Mean Price by Neighborhood') +
+  ylab('Mean MAPE by Neighborhood') +
+  plotTheme()
+```
+
+## 4.11 Generalizability Examination
+
+This section gathered Census data to test how well baseline model generalizes to different group contexts, such as race group and income level.
+
+### 4.11.1 Context Group Building
+
+we selected four census variables to display the spatial pattern of each group:
+* Majority White vs. Majority Non-White: divided whether the proportion of white population is accounted for more than 50% of total population or not.
+* High Income vs. Low Income: divided whether the median household income in certain census tract is above or below the average level.
+
+```{r census,fig.align='center',warning=FALSE,message=FALSE}
+census<-model_set.test %>%   
+  mutate(raceContext = ifelse(pctWhite > .5, "Majority White", "Majority Non-White"),
+         incomeContext = ifelse(MedHHInc > mean(MedHHInc,na.rm = T), "High Income", "Low Income"),
+        vacantContext = ifelse(pctTotalVacant > .5, "Majority Vacant", "Majority Non-Vacant"),
+        pctRenterContext = ifelse(pctPoverty > .5, "Majority Renter Occupied", "Majority Non-Renter Occupied")) %>%dplyr::select(raceContext,incomeContext,vacantContext,pctRenterContext)
+
+census<-census %>% st_transform(crs=4326)
+
+grid.arrange(ncol = 2,
+             ggplot() + 
+               geom_sf(data = st_union(tract), fill = 'white',color='grey90') + 
+               geom_sf(data = na.omit(census), aes(color = raceContext),
+                       show.legend = "point", size= .75) +
+               scale_color_manual(values = c('#abd9e9', '#fecc5c'), name="Race Context") +
+               labs(title = "Race Context of House\n",
+                    caption = 'Figure 4.11.1') +
+               mapTheme() + 
+               theme(legend.position="bottom"),
+             
+             ggplot() + 
+               geom_sf(data = st_union(tract), fill = 'white',color='grey90') +
+               geom_sf(data = na.omit(census), aes(color = incomeContext),
+                       show.legend = "point", size= .75) +
+               scale_color_manual(values = c('#abd9e9', '#fecc5c'), name="Income Context") +
+               labs(title = "Income Context of House\n",
+                    caption = 'Figure 4.11.2') +
+               mapTheme() + 
+               theme(legend.position="bottom"))
+```
+
+### 4.11.2 Model Modifying with Neighborhood Effects
+
+MAE, and MAPE of both regression models are shown below. The finding was not intuitive that the new model performed a little better in terms of MAE and MAPE. 
+
+Hence, it is imperative to further examine how well both models could be generalized in race context and income level context, and then to determine which model should be remained. 
+
+```{r bothRegression,warning=FALSE,message=FALSE}
+
+bothRegression<-rbind(train_model_set.test,Nhood_model.test) %>% dplyr::select(Regression,price.AbsError,price.APE)
+
+st_drop_geometry(bothRegression) %>% gather(Variable,Value,-Regression) %>%  group_by(Regression, Variable) %>%
+    summarize(meanValue = mean(Value, na.rm = T)) %>%
+    spread(Variable, meanValue) %>%
+    kable(caption = 'Table 4.11.1\nSummary of MAE, and MAPE by Regression Models') %>% kable_styling("striped", full_width = F)
+```
+
+### 4.11.3 Generalizability on Context Groups
+
+Considering context groups, our new model with neighborhood features performs better  in terms of MAPE and MAE.
+
+The **Neighborhood Effects** model generalizes well on both context groups with close MAPE to the one generated on the test group.
+
+```{r warning=FALSE,message=FALSE}
+#scales::percent
+bothRegression<-rbind(train_model_set.test,Nhood_model.test)
+
+race.group <- st_join(bothRegression, census) %>% 
+  group_by(Regression, raceContext) %>%
+  summarize(mean.MAPE = (mean(price.APE, na.rm = T))) %>%
+  st_drop_geometry() %>%
+  spread(raceContext, mean.MAPE) %>%
+  kable(caption = "Table 4.11.2\nTest set MAPE by Neighborhood Racial Context") %>% 
+  kable_styling("striped", full_width = F)
+
+race.group
+```
+
+
+```{r warning=FALSE,message=FALSE}
+#scales::percent
+income.group <- st_join(bothRegression, census) %>% 
+  group_by(Regression, incomeContext) %>%
+  summarize(mean.MAPE = (mean(price.APE, na.rm = T))) %>%
+  st_drop_geometry() %>%
+  spread(incomeContext, mean.MAPE) %>%
+  kable(caption = "Table 4.11.3\nTest set MAPE by Neighborhood Income Context") %>% 
+  kable_styling("striped", full_width = F)
+
+income.group
+```
+
+### 4.11.4 Final Model
+
+Eventually, we settled down with a model built with the Neighborhood Effects Model, and conducted prediction on the secret data set. Summary statistics of predicted sale price is attached below.
+
+```{r warning=FALSE,message=FALSE}
+MODEL<-Nhood
+
+challenge_set.predict<-challenge_set %>% 
+  mutate(challenge.predict = predict(MODEL, newdata = challenge_set)) %>% 
+  mutate(challenge.predict=ifelse(is.na(challenge.predict),515144,challenge.predict)) %>% dplyr::select(musaID,challenge.predict)
+
+write.csv(challenge_set.predict,"pred_challenge_set.csv")
+```
+
+# V.Discussion
+
+**Accuracy and Generalizability**: Overall, the predictive model is relatively **effective** in terms of predicting sale price in the Mecklenburg County, NC. The model captured around **70%** of variation in prices we were required to predict. For the sake of accuracy, the MAE on the test set is around 64K with 18.08% MAPE. As for the generalizability, MAPEs are between 16% and 19% considering the context groups to which the model was applied. A potential weakness of the model should be addressed is if the generalizability test result was overestimated or manipulated since proportion of white population and median household income were both features in the model. 
+
+**Feature Effect**: 
+The baseline model contained the following features.
+
+* **1** non-numeric feature: `bldggrade.m`; 
+* **5** internal characteristic features: `shape_Area`,`heatedarea`,`fullbaths`,`bedrooms`, `units`;
+* **9** tract features: `pctRenterOccupied`,`pctWhite`,`MedHHInc`,`test.elementary`,
+`crime_sum`,`PctLongCommute`,`Pctgrocery`,`isin`,`zip`;
+* **4** amenity features: 
+`college_nn5`,`library_nn2`,`hist_properties_nn5`,`capital_improve_nn2`.
+
+The highlight of this model is including **whether the house is in Business Investment Opportunity Zones** (`isin`) as one of the features to predict sale price. Since **Business Investment Opportunity Zones** displays areas that are within a 1/4 mile of a commercial property that has a value 70% the County average and a median household income of <= 55K in Mecklenburg County, we regarded it as an interesting addition to display the spatial environment the house unit is located at. 
+
+Considering the neighborhood effects, the geographical feature finally added into the model is the **zipcode**(`zip`) instead of **census tract**(`GEOID`). The reason is that some indicators of house price (e.g. crime, transit), need scale to exist. Blocks in **zipcode** is slightly larger than that of **census tract**, therefore we think it may better help explain why the price of houses cluster.
+
+The accessibility of **education resources** is an easy-ignored but powerful feature to show how amenities affect the local house price. Rather than only focus on the entertainment demand, we cared more about if the local residents’requirements on education have been refilled. So we added some education-related features, such as `test.elementary`, and distance to libraries(knn). Evidence has indicated that such a consideration is worthy. 
+
+Additionally, although we included far more amenity features in the initial stage, such as the proximity to churches, historical cemeteries, and the proximity to medical facilities, those features were eventually excluded from the model based on the series of rigorous model evaluation. However, we still believe it is worthy taking those features into consideration and they might be helpful when being used in other regression models.
+
+**Errors and Spatial Variations**: Generally speaking, larger MAEs occurred in the Downtown Charlotte and north region of Mecklenburg County, while the model performed better in the rest of areas. One guess is potential spatial features that are directly related to the two areas have been somehow missed out. But we still feel confident about the model based on the examinations above.
+
+# VI. Conclusion
+
+If all the model examination and interpretation have been conducted correctly as shown above, we would like to **recommend** the **Neighborhood Effects** model to Zillow as it incorporates some Mecklenburg County’s local intelligent features that were absent in the previous models and performed comparatively well on either accuracy or generalizability. 
+
+To further reduce the error rate, more amenity features such as local restaurants and bars (data unavailable so far), financial related agencies, public transportation and spatial features such as zoning should be taken into consideration. And more context studies on downtown Charlotte and north region are also highly needed since we would like to extract some similarities between the two regions that would be the magic ingredients of cooking models in the future. 
+
